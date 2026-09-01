@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>BUDGET-SYM</title>
+<style>
+  @page { size: A4 landscape; margin: 14mm; }
+  * { box-sizing: border-box; }
+  body {
+    font-family: 'Segoe UI', Calibri, Arial, sans-serif;
+    color: #1a2233;
+    margin: 0;
+    background: #fff;
+  }
+  section {
+    page-break-after: always;
+    min-height: 178mm;
+    padding: 6mm 4mm;
+    display: flex;
+    flex-direction: column;
+  }
+  section:last-child { page-break-after: auto; }
+  h1 { font-size: 34px; margin: 0 0 4px 0; color: #14324f; }
+  h2 { font-size: 15px; text-transform: uppercase; letter-spacing: 2px; color: #5b8def; margin: 0 0 18px 0; font-weight: 600; }
+  h3 { font-size: 19px; color: #14324f; margin: 18px 0 8px 0; }
+  p, li { font-size: 15px; line-height: 1.55; }
+  .tag { display:inline-block; background:#eef3fc; color:#2f5fae; padding:3px 10px; border-radius:12px; font-size:12px; font-weight:600; margin-bottom:14px; }
+  .cols { display: flex; gap: 24px; flex: 1; }
+  .col { flex: 1; }
+  .quote { font-style: italic; background:#f5f7fb; border-left: 4px solid #5b8def; padding: 14px 18px; font-size: 16px; margin: 14px 0; }
+  table { border-collapse: collapse; width: 100%; font-size: 13px; margin: 10px 0; }
+  th, td { border: 1px solid #d9e0ec; padding: 6px 10px; text-align: left; }
+  th { background: #eef3fc; color: #14324f; }
+  .rep-box { display:inline-block; border:2px solid; border-radius:8px; padding:8px 16px; margin:4px; font-weight:600; font-size:14px; }
+  .rep-inline { border-color:#5b8def; color:#5b8def; }
+  .rep-interned { border-color:#2fb380; color:#2fb380; }
+  .rep-compressed { border-color:#e08e45; color:#e08e45; }
+  .arrow { font-size: 22px; color:#9aa5b1; text-align:center; margin: 4px 0; }
+  .metric { font-size: 30px; font-weight:700; color:#14324f; }
+  .metric-label { font-size: 12px; color:#5b7290; text-transform:uppercase; letter-spacing:1px; }
+  .metric-box { background:#f5f7fb; border-radius: 10px; padding: 14px 18px; text-align:center; min-width: 140px; }
+  .metric-row { display:flex; gap: 16px; margin: 16px 0; flex-wrap: wrap; }
+  figure { margin: 8px 0; text-align: center; }
+  figure img { max-width: 100%; max-height: 105mm; }
+  figcaption { font-size: 12px; color: #5b7290; margin-top: 4px; }
+  .footer { margin-top: auto; font-size: 11px; color: #9aa5b1; border-top: 1px solid #eee; padding-top: 6px; }
+  .qa dt { font-weight: 700; color: #14324f; margin-top: 12px; font-size: 14.5px; }
+  .qa dd { margin: 4px 0 0 0; font-size: 13.5px; color: #33415c; line-height: 1.5; }
+  code { background:#f0f2f7; padding:1px 5px; border-radius:4px; font-size:0.9em; }
+</style>
+</head>
+<body>
+
+<section>
+  <span class="tag">FACULTY REVIEW &middot; 5-MINUTE PLAN</span>
+  <h1>BUDGET-SYM</h1>
+  <h2>An Adaptive Scope-Aware Symbol Table for Memory-Bounded Embedded Compilation</h2>
+  <div class="quote">
+    Does a per-symbol adaptive representation policy &mdash; driven by memory pressure, scope/lifetime,
+    and access frequency &mdash; measurably beat a conventional symbol table and plain string interning
+    on the same workload? Tested with a working C++ prototype, two real baselines, 8 benchmark datasets,
+    and a 4-variant ablation study. Every number in this deck comes from actually running that code.
+  </div>
+  <div class="metric-row">
+    <div class="metric-box"><div class="metric">1.24&ndash;2.37&times;</div><div class="metric-label">tracked memory vs conventional</div></div>
+    <div class="metric-box"><div class="metric">3</div><div class="metric-label">representations: INLINE / INTERNED / COMPRESSED</div></div>
+    <div class="metric-box"><div class="metric">1418</div><div class="metric-label">lines of C++14, header-only core</div></div>
+    <div class="metric-box"><div class="metric">2</div><div class="metric-label">real toolchain/logic bugs caught &amp; fixed</div></div>
+  </div>
+  <div class="footer">Repository: <code>compiler</code> &middot; github.com/&lt;user&gt;/compiler</div>
+</section>
+
+<section>
+  <h2>Minute 1</h2>
+  <h1 style="font-size:26px">The Problem</h1>
+  <div class="quote">
+    Embedded compilation environments have constrained memory, while conventional symbol tables can
+    carry significant string, metadata, and indexing overhead.
+  </div>
+  <p>A compiler targeting a memory-bounded embedded platform faces a trade-off its desktop-scale
+  counterpart usually doesn't have to make:</p>
+  <ul>
+    <li>It cannot always afford a conventional symbol table's peak memory for a large translation unit.</li>
+    <li>It also cannot uniformly pay a compression scheme's lookup-time cost for <em>every</em> identifier
+      &mdash; including ones on a hot path, like a loop counter inside an interrupt handler.</li>
+  </ul>
+  <p>Neither extreme (always fast / always compact) fits this constraint well on its own. That gap is
+  what this project investigates &mdash; empirically, with a working implementation, not just in theory.</p>
+</section>
+
+<section>
+  <h2>Minute 2</h2>
+  <h1 style="font-size:26px">Existing Approaches &amp; Their Limitation</h1>
+  <table>
+    <tr><th>Technique</th><th>What it does</th><th>Measured here (vs conventional baseline)</th></tr>
+    <tr><td>Conventional hash table</td><td><code>unordered_map&lt;string, Symbol&gt;</code>, one full string copy per symbol</td><td>1.00&times; (the reference point)</td></tr>
+    <tr><td>String interning</td><td>Shared, refcounted pool; symbols hold a small index instead of a copy</td><td>~1.05&ndash;1.07&times; on every one of 8 datasets</td></tr>
+    <tr><td>Compressed / trie-based dictionaries</td><td>Front-coding / prefix-shared storage, applied uniformly</td><td>Not benchmarked standalone &mdash; used here as one of three <em>per-symbol</em> choices, not a whole-table strategy</td></tr>
+  </table>
+  <h3>The limitation, stated plainly</h3>
+  <p>None of these make a representation decision using a <strong>unified, compiler-aware
+  memory-budget policy</strong> that also reacts to how a symbol is actually used at runtime.
+  Interning only helps on exact repeats &mdash; and most identifiers in a translation unit are declared
+  once. A uniform compression scheme doesn't ask whether a specific identifier is worth the lookup-time
+  cost right now.</p>
+</section>
+
+<section>
+  <h2>Minute 3</h2>
+  <h1 style="font-size:26px">Our Proposed Architecture</h1>
+  <p><strong>Not novel:</strong> interning, front-coding, and scope-stack symbol tables are all
+  established techniques, used here as baselines or as one representation among three.
+  <strong>Proposed:</strong> the unified policy that chooses between them per symbol, and adapts the
+  choice after insertion based on real access counts.</p>
+
+  <svg viewBox="0 0 900 300" width="100%" height="260" style="margin-top:10px">
+    <style>
+      .box { fill:#f5f7fb; stroke:#5b8def; stroke-width:1.5; rx:8; }
+      .box2 { fill:#eef3fc; stroke:#9aa5b1; stroke-width:1.2; rx:6; }
+      .lbl { font-family:'Segoe UI',Arial,sans-serif; font-size:13px; fill:#14324f; text-anchor:middle; }
+      .lbl2 { font-family:'Segoe UI',Arial,sans-serif; font-size:12px; fill:#33415c; text-anchor:middle; }
+      .arr { stroke:#9aa5b1; stroke-width:1.6; fill:none; marker-end:url(#ah); }
+    </style>
+    <defs>
+      <marker id="ah" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+        <path d="M0,0 L6,3 L0,6 Z" fill="#9aa5b1"/>
+      </marker>
+    </defs>
+
+    <rect x="330" y="10" width="240" height="34" class="box2"/>
+    <text x="450" y="31" class="lbl">Source Code &rarr; Identifier Extraction</text>
+    <path d="M450,44 L450,64" class="arr"/>
+
+    <rect x="330" y="66" width="240" height="34" class="box"/>
+    <text x="450" y="87" class="lbl">BUDGET-SYM Controller</text>
+    <path d="M450,100 L450,118" class="arr"/>
+
+    <rect x="60" y="120" width="220" height="46" class="box2"/>
+    <text x="170" y="140" class="lbl2">Memory Monitor</text>
+    <text x="170" y="156" class="lbl2">budget, current, pressure</text>
+
+    <rect x="340" y="120" width="220" height="46" class="box2"/>
+    <text x="450" y="140" class="lbl2">Scope / Lifetime Analyzer</text>
+    <text x="450" y="156" class="lbl2">enter/exit, reclamation</text>
+
+    <rect x="620" y="120" width="220" height="46" class="box2"/>
+    <text x="730" y="140" class="lbl2">Access Profiler</text>
+    <text x="730" y="156" class="lbl2">per-symbol accessCount</text>
+
+    <path d="M170,120 L400,102" class="arr"/>
+    <path d="M450,118 L450,120" class="arr"/>
+    <path d="M730,120 L500,102" class="arr"/>
+
+    <path d="M170,166 L440,190" class="arr"/>
+    <path d="M450,166 L450,190" class="arr"/>
+    <path d="M730,166 L460,190" class="arr"/>
+
+    <rect x="300" y="192" width="300" height="34" class="box"/>
+    <text x="450" y="213" class="lbl">Adaptive Representation Policy (decide)</text>
+    <path d="M450,226 L450,244" class="arr"/>
+
+    <rect x="230" y="246" width="120" height="34" class="box2" style="stroke:#5b8def"/>
+    <text x="290" y="267" class="lbl2" style="fill:#5b8def;font-weight:600">INLINE</text>
+    <rect x="390" y="246" width="120" height="34" class="box2" style="stroke:#2fb380"/>
+    <text x="450" y="267" class="lbl2" style="fill:#2fb380;font-weight:600">INTERNED</text>
+    <rect x="550" y="246" width="120" height="34" class="box2" style="stroke:#e08e45"/>
+    <text x="610" y="267" class="lbl2" style="fill:#e08e45;font-weight:600">COMPRESSED</text>
+
+    <path d="M550,263 C 500,285 470,300 460,282" class="arr" stroke-dasharray="4,3"/>
+    <text x="500" y="298" class="lbl2" style="font-size:10px">promote when "hot"</text>
+  </svg>
+  <p style="font-size:12px;color:#5b7290">Full component-to-file map in <code>docs/architecture.md</code>.</p>
+</section>
+
+<section>
+  <h2>Minute 4</h2>
+  <h1 style="font-size:26px">Live Demonstration &mdash; <code>./budget_sym_demo.exe</code></h1>
+  <p>Every number below is real, computed output from actually running the insert/lookup/scope
+  operations shown &mdash; nothing here is scripted text.</p>
+  <ol>
+    <li><strong>Insertion + representation decisions</strong> &mdash; 6 identifiers, watch different
+      ones land on different representations:
+      <div><span class="rep-box rep-interned">temperatureSensor &rarr; INTERNED</span>
+      <span class="rep-box rep-compressed">temperatureValue &rarr; COMPRESSED</span>
+      <span class="rep-box rep-compressed">temperatureThreshold &rarr; COMPRESSED</span>
+      <span class="rep-box rep-inline">counter &rarr; INLINE</span>
+      <span class="rep-box rep-inline">index &rarr; INLINE</span></div>
+    </li>
+    <li><strong>Memory saved vs conventional</strong> &mdash; computed by building a real
+      <code>ConventionalSymbolTable</code> on the same 6 symbols and diffing tracked memory: ~49% saved.</li>
+    <li><strong>Nested scope</strong> &mdash; 20 symbols inserted into a child scope, then
+      <code>exitScope()</code>: real, nonzero <code>Symbols released</code> / <code>Memory reclaimed</code> printed.</li>
+    <li><strong>Adaptive promotion</strong> &mdash; 3 long, prefix-similar identifiers inserted (some land
+      COMPRESSED), the hot one looked up 3&times;: watch it flip to INTERNED live,
+      re-queried and printed after the accesses.</li>
+    <li><strong>Lookup test</strong> &mdash; FOUND / FOUND / NOT FOUND, including a genuine miss.</li>
+  </ol>
+</section>
+
+<section>
+  <h2>Minute 5</h2>
+  <h1 style="font-size:26px">Experimental Plan</h1>
+  <div class="cols">
+    <div class="col">
+      <figure><img src="figures/compression_ratio.png"><figcaption>Compression ratio vs conventional &mdash; every dataset, both baselines beaten</figcaption></figure>
+    </div>
+    <div class="col">
+      <figure><img src="figures/ablation_memory.png"><figcaption>Ablation: Full (33,581B) vs NoAdaptiveSelection / "just intern" (50,642B)</figcaption></figure>
+    </div>
+  </div>
+  <p style="font-size:13px">Honest cost, shown unprompted (see <code>figures/lookup_latency.png</code>): BudgetSym's
+  lookup is slower than both baselines on most datasets &mdash; the hash-then-reconstruct lookup path every
+  entry uses. This is a memory-for-latency trade, not a strict win on every axis.</p>
+  <p style="font-size:13px"><strong>Next steps</strong> (<code>docs/experiment_plan.md</code>): multi-seed
+  statistical significance testing, real embedded-codebase identifier traffic instead of synthetic
+  datasets, a threshold sweep over the policy's hand-picked constants.</p>
+</section>
+
+<section>
+  <h2>Backup &mdash; Anticipated Questions</h2>
+  <h1 style="font-size:24px">Faculty Q&amp;A</h1>
+  <dl class="qa">
+    <dt>What exactly is novel?</dt>
+    <dd>Not any single representation. The unified policy combining memory pressure, scope/lifetime,
+    exact-repeat status, and prefix similarity into one per-symbol decision &mdash; plus post-insertion
+    promotion driven by real access counts.</dd>
+    <dt>Why not just use a trie / string interning?</dt>
+    <dd>Both are measured baselines here, not straw men. Plain interning only reaches ~1.05&ndash;1.07&times;
+    across every dataset because it only helps on exact repeats. A trie compresses uniformly and can't
+    natively "un-compress" one entry that turns out to be hot without restructuring.</dd>
+    <dt>How are you measuring memory?</dt>
+    <dd>"Tracked Memory" &mdash; a documented, deterministic cost model computed from real stored data
+    lengths + fixed metadata constants, consistent across all three implementations. Explicitly not OS
+    RSS; stated as such everywhere it's printed (<code>docs/methodology.md</code>).</dd>
+    <dt>Does compression hurt lookup?</dt>
+    <dd>Yes, measurably &mdash; BudgetSym's lookup_success_us is consistently higher than both baselines
+    in <code>results/benchmark_results.csv</code>. That's exactly why the promotion mechanic exists.</dd>
+    <dt>How will you prove this is better?</dt>
+    <dd>We don't claim proof &mdash; a measured result on 8 synthetic workloads, reported honestly including
+    where it isn't strictly better. Multi-seed statistics + real compiler traffic are the concrete next step.</dd>
+  </dl>
+</section>
+
+</body>
+</html>
