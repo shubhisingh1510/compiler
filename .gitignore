@@ -1,0 +1,14 @@
+# Build artifacts (regenerate with ./build.sh)
+*.exe
+*.o
+*.obj
+tests/smoke_test.exe
+
+# Python
+__pycache__/
+*.pyc
+
+# Editor/OS
+.vscode/
+.DS_Store
+Thumbs.db
