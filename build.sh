@@ -20,6 +20,9 @@ $CXX $FLAGS src/benchmark_main.cpp -o benchmark.exe
 echo "== Building ablation =="
 $CXX $FLAGS src/ablation_main.cpp -o ablation.exe
 
+echo "== Building analyze (web dashboard's real backend engine) =="
+$CXX $FLAGS src/analyze_main.cpp -o analyze.exe
+
 echo ""
 echo "== Running smoke test =="
 ./tests/smoke_test.exe

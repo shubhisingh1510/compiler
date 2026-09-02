@@ -1,9 +1,12 @@
 @import "tailwindcss";
 
+/* Light theme only, per project design direction: white / off-white / very
+   light gray surfaces, soft blue + muted indigo + subtle cyan/teal accents,
+   dark navy text. No dark mode. */
 @layer base {
   :root {
-    --background: #090d16;
-    --foreground: #f1f5f9;
+    --background: #fbfcfe;
+    --foreground: #0f172a;
   }
 }
 
@@ -11,53 +14,50 @@ body {
   background-color: var(--background);
   color: var(--foreground);
   font-family: var(--font-geist-sans), system-ui, sans-serif;
-  background-image: 
-    radial-gradient(at 0% 0%, rgba(20, 184, 166, 0.07) 0px, transparent 50%),
-    radial-gradient(at 100% 0%, rgba(99, 102, 241, 0.07) 0px, transparent 50%),
-    radial-gradient(at 50% 100%, rgba(245, 158, 11, 0.04) 0px, transparent 50%);
+  background-image:
+    radial-gradient(at 0% 0%, rgba(79, 70, 229, 0.035) 0px, transparent 55%),
+    radial-gradient(at 100% 0%, rgba(20, 184, 166, 0.03) 0px, transparent 55%);
   background-attachment: fixed;
 }
 
-/* Custom scrollbars */
+/* Custom scrollbars -- light */
 ::-webkit-scrollbar {
   width: 8px;
   height: 8px;
 }
-
 ::-webkit-scrollbar-track {
-  background: #0f172a;
+  background: #f1f5f9;
 }
-
 ::-webkit-scrollbar-thumb {
-  background: #1e293b;
+  background: #cbd5e1;
   border-radius: 4px;
 }
-
 ::-webkit-scrollbar-thumb:hover {
-  background: #334155;
+  background: #94a3b8;
 }
 
-.glass-panel {
-  background: rgba(15, 23, 42, 0.75);
-  backdrop-filter: blur(12px);
-  border: 1px solid rgba(51, 65, 85, 0.6);
+/* Card surfaces. Named "panel"/"card" (not "glass-*") because the light
+   theme uses solid, crisp surfaces rather than dark glassmorphism blur. */
+.panel {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
 }
 
-.glass-card {
-  background: rgba(30, 41, 59, 0.4);
-  backdrop-filter: blur(8px);
-  border: 1px solid rgba(51, 65, 85, 0.5);
+.panel-soft {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
 }
 
-/* Glowing borders */
-.glow-teal {
-  box-shadow: 0 0 25px -5px rgba(20, 184, 166, 0.25);
+.card-hover {
+  transition: box-shadow 180ms ease, border-color 180ms ease, transform 180ms ease;
+}
+.card-hover:hover {
+  box-shadow: 0 4px 16px rgba(15, 23, 42, 0.07);
+  border-color: #cbd5e1;
 }
 
-.glow-amber {
-  box-shadow: 0 0 25px -5px rgba(245, 158, 11, 0.25);
-}
-
-.glow-indigo {
-  box-shadow: 0 0 25px -5px rgba(99, 102, 241, 0.25);
+/* Monospace numeric alignment helper (used by data tables). */
+.font-numeric {
+  font-variant-numeric: tabular-nums;
 }

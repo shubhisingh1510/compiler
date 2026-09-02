@@ -140,6 +140,13 @@ public:
     const PolicyConfig& config() const { return cfg_; }
     size_t promotions() const { return promotions_; }
 
+    // Human-readable reason for the representation decide() made on the most
+    // recent insert() call. Additive, non-breaking: existing callers that
+    // never look at this are unaffected. Used by the web dashboard's Symbol
+    // Table Explorer to show real reasoning instead of a guess -- see
+    // src/analyze_main.cpp, which reads this immediately after each insert().
+    const std::string& lastDecisionReason() const { return lastDecisionReason_; }
+
 private:
     struct Entry {
         SymbolMeta meta;
@@ -162,7 +169,10 @@ private:
     // ---- policy ----------------------------------------------------------
     Representation decide(const std::string& name, bool isRepeat, double pressure,
                            size_t accessFreqHint, size_t prefixShared) const {
-        if (cfg_.disableAdaptiveSelection) return cfg_.fixedRepresentation;
+        if (cfg_.disableAdaptiveSelection) {
+            lastDecisionReason_ = "Adaptive selection disabled (ablation config) -- forced to a fixed representation.";
+            return cfg_.fixedRepresentation;
+        }
 
         bool hot = accessFreqHint >= cfg_.hotAccessThreshold;
         bool longId = name.size() >= cfg_.compressMinLen;
@@ -173,22 +183,43 @@ private:
         // Exact repeats: interning is essentially free memory-wise (shared,
         // refcounted) and keeps O(1)-ish lookup, so it always wins over
         // paying for a second full or compressed copy of the same string.
-        if (isRepeat) return Representation::INTERNED_REP;
+        if (isRepeat) {
+            lastDecisionReason_ = "Exact repeat of an identifier already seen -- interning shares "
+                "the existing pool entry for free instead of paying for a second copy.";
+            return Representation::INTERNED_REP;
+        }
 
         // Under real memory pressure, prefer the compact representation for
         // anything long enough to be worth compressing -- unless it's hot,
         // in which case lookup speed matters more than the bytes saved.
-        if (highPressure && longId && !hot) return Representation::COMPRESSED_REP;
+        if (highPressure && longId && !hot) {
+            lastDecisionReason_ = "Memory pressure is elevated (>= " +
+                std::to_string(static_cast<int>(cfg_.highPressureThreshold * 100)) +
+                "% of budget) and this identifier is long enough (>= " +
+                std::to_string(cfg_.compressMinLen) + " chars) to be worth compressing.";
+            return Representation::COMPRESSED_REP;
+        }
 
         // Not under pressure, but this identifier front-codes well against
         // its predecessor and isn't hot: still worth compressing opportunistically.
-        if (longId && prefixSimilar && !hot) return Representation::COMPRESSED_REP;
+        if (longId && prefixSimilar && !hot) {
+            lastDecisionReason_ = "Shares a long prefix (>= " +
+                std::to_string(cfg_.prefixSimilarityMinShared) +
+                " chars) with the previously inserted identifier, and is long enough to "
+                "front-code well -- compressing it opportunistically.";
+            return Representation::COMPRESSED_REP;
+        }
 
         // Short identifier, plenty of budget left: cheapest possible path,
         // no pool indirection needed.
-        if (name.size() < cfg_.inlineMaxLen && lowPressure) return Representation::INLINE_REP;
+        if (name.size() < cfg_.inlineMaxLen && lowPressure) {
+            lastDecisionReason_ = "Short identifier (< " + std::to_string(cfg_.inlineMaxLen) +
+                " chars) under low memory pressure -- cheapest path, no pool indirection needed.";
+            return Representation::INLINE_REP;
+        }
 
         // Default / fallback: balanced cost and lookup speed.
+        lastDecisionReason_ = "No other rule applied -- default fallback, balanced cost and lookup speed.";
         return Representation::INTERNED_REP;
     }
 
@@ -359,6 +390,7 @@ private:
     size_t promotions_ = 0;
     MemoryTracker tracker_;
     PolicyConfig cfg_;
+    mutable std::string lastDecisionReason_; // set by decide() (const); see lastDecisionReason()
 };
 
 } // namespace budgetsym

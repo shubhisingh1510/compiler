@@ -21,10 +21,24 @@ export const DEFAULT_CONFIG: PolicyConfig = {
   highPressure: 0.85,
   hotThreshold: 3,
   prefixMinShared: 4,
-  budgetBytes: 1024,
+  // 4096, not the benchmark suite's generous 64MB: small enough that the demo
+  // presets can still visibly cross the pressure thresholds, but not so tiny
+  // (the previous default was 1024) that short-lived symbols get pushed into
+  // COMPRESSED/INTERNED overhead that exceeds even the conventional baseline
+  // for a normal-sized snippet -- that's a real characteristic of the policy
+  // under pressure, not a bug, but it made the default demo view look
+  // misleadingly worse than the benchmarked scenarios ever are.
+  budgetBytes: 4096,
 };
 
-const OVERHEAD = { inline: 28, interned: 28, compressedLink: 29, poolStructBase: 32 };
+// conventional mirrors include/conventional_symbol_table.hpp::entryCost():
+// sizeof(std::string) (~32B control block) + kMetaOverhead (32B) = 64B fixed,
+// deliberately NOT the same as BudgetSym's own `inline` overhead (28B) --
+// they're different real C++ structs with different real costs. An earlier
+// version of this file reused `inline` for both, which understated the
+// conventional baseline and made BudgetSym's ratio look worse than the real
+// engine ever measures it (see docs/methodology.md's cost table).
+const OVERHEAD = { inline: 28, interned: 28, compressedLink: 29, poolStructBase: 32, conventional: 64 };
 
 const KEYWORDS = new Set([
   "void", "int", "float", "double", "char", "if", "else", "for", "while",
@@ -106,7 +120,7 @@ export function runPolicySim(code: string, cfg: PolicyConfig = DEFAULT_CONFIG): 
       repCounts[rep]++;
       seen.set(name, { rep, bytes, accessCount: 0 });
       lastInserted = name;
-      conventionalBytes += name.length + 1 + OVERHEAD.inline;
+      conventionalBytes += name.length + 1 + OVERHEAD.conventional;
       log.push({ name, event: "insert", rep, bytes });
     } else {
       const entry = seen.get(name)!;
