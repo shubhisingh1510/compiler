@@ -4,9 +4,11 @@
 *.obj
 tests/smoke_test.exe
 
-# Python
+# Python & Virtualenv
 __pycache__/
 *.pyc
+venv/
+.venv/
 
 # Editor/OS
 .vscode/
