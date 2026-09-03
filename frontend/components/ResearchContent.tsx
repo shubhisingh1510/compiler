@@ -33,11 +33,11 @@ const SECTIONS = [
   },
   {
     title: "Limitations",
-    body: "Single run per dataset (no multi-seed statistical significance testing yet). Synthetic datasets, not real compiler traffic from an actual embedded codebase. Hand-picked policy thresholds, not tuned against a validation workload. COMPRESSED chain-interior reclamation is incomplete — an interior node's bytes can't always be physically freed without breaking descendants' decode chain.",
+    body: "Real-world corpus evaluation (FreeRTOS/Arduino/Zephyr) needs the user to vendor those codebases locally (see docs/corpus_setup.md) — the extraction and benchmark tooling is built and verified, but not yet run against real corpora in this environment. COMPRESSED chain-interior reclamation is incomplete — an interior node's bytes can't always be physically freed without breaking descendants' decode chain.",
   },
   {
     title: "Future Work",
-    body: "Multi-seed statistical significance testing. Real embedded-codebase identifier traffic instead of synthetic datasets. A threshold sweep over the policy's configuration instead of hand-picked defaults. A compacting pass for COMPRESSED chain-interior fragmentation.",
+    body: "Multi-seed statistical significance testing — implemented: 30 seeds per dataset, 95% confidence intervals and p-values, see results/multiseed_summary.csv. Threshold grid search over the policy's configuration — implemented: 15,000-config sweep, see results/grid_search_full.csv and results/optimal_policy.csv. Real embedded-codebase identifier traffic instead of synthetic datasets — tooling implemented, pending real corpora (see results/corpus_results.csv once run). A compacting pass for COMPRESSED chain-interior fragmentation.",
   },
 ];
 

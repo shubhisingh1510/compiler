@@ -116,8 +116,8 @@ npm run dev                    # http://localhost:3000
         <Section id="limitations" title="Limitations">
           <ul className="text-xs text-slate-600 leading-relaxed list-disc pl-4 space-y-1">
             <li>The extractor is a heuristic, not a real C/C++ parser — see the warning banner it produces on the Compiler page for anything it couldn&apos;t confidently interpret.</li>
-            <li>Single-run measurements, not multi-seed statistics.</li>
-            <li>Synthetic benchmark datasets, not real compiler traffic.</li>
+            <li>Multi-seed statistics (30 seeds, 95% CIs, p-values) are now computed — see results/multiseed_summary.csv.</li>
+            <li>Synthetic benchmark datasets remain the primary source; real-world corpus tooling (FreeRTOS/Arduino/Zephyr) is built and verified but needs the user to vendor those codebases locally — see docs/corpus_setup.md.</li>
             <li>COMPRESSED chain-interior reclamation is incomplete (documented in the C++ source).</li>
           </ul>
         </Section>
