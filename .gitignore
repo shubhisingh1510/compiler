@@ -10,6 +10,9 @@ __pycache__/
 venv/
 .venv/
 
+# Vendored third-party source for corpus evaluation (see docs/corpus_setup.md)
+corpora/
+
 # Editor/OS
 .vscode/
 .DS_Store
