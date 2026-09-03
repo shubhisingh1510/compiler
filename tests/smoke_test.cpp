@@ -7,6 +7,8 @@
 #include "../include/conventional_symbol_table.hpp"
 #include "../include/interned_symbol_table.hpp"
 #include "../include/budget_sym.hpp"
+#include "../include/dataset_generators.hpp"
+#include "../include/bench_metrics.hpp"
 
 using namespace budgetsym;
 
@@ -112,6 +114,36 @@ void test_budgetsym_memory_pressure_selects_compressed() {
     CHECK(t.representationOf("longIdentifierName") == Representation::COMPRESSED_REP);
 }
 
+// Review-2 additions: dataset_generators.hpp / bench_metrics.hpp were
+// factored out of benchmark_main.cpp so grid_search/multiseed/corpus_bench
+// can reuse them -- these checks guard the determinism the whole sweep
+// infrastructure depends on.
+void test_dataset_generators_deterministic() {
+    Dataset a = genUniformRandom("x", 50, 4, 10, 7, 1 << 20);
+    Dataset b = genUniformRandom("x", 50, 4, 10, 7, 1 << 20);
+    CHECK(a.identifiers == b.identifiers); // same seed -> identical output
+    CHECK(a.identifiers.size() == 50);
+
+    // genHighPrefixSimilarity ignores its seed param by design (kept
+    // byte-identical to Review-1 benchmark_main.cpp); the seeded sibling
+    // must actually vary so multiseed.exe's 30 seeds aren't degenerate.
+    Dataset p1 = genHighPrefixSimilaritySeeded(20, 1, 1 << 20);
+    Dataset p2 = genHighPrefixSimilaritySeeded(20, 2, 1 << 20);
+    CHECK(p1.identifiers != p2.identifiers);
+    CHECK(p1.identifiers.size() == 20);
+}
+
+void test_bench_metrics_compression_ratio() {
+    HiResTimer timer;
+    Dataset ds = genUniformRandom("y", 30, 6, 14, 3, 1 << 20);
+    ConventionalSymbolTable conv(ds.budgetBytes);
+    Metrics convM = runOne(timer, "Conventional", ds, conv, 0);
+    BudgetSym budget(ds.budgetBytes);
+    Metrics budgetM = runOne(timer, "BudgetSym", ds, budget, convM.memory_bytes);
+    CHECK(budgetM.compression_ratio > 0.0);
+    CHECK(budgetM.symbols == ds.identifiers.size() || budgetM.symbols <= ds.identifiers.size());
+}
+
 int main() {
     test_conventional();
     test_interned();
@@ -120,6 +152,8 @@ int main() {
     test_budgetsym_compression_roundtrip();
     test_budgetsym_promotion();
     test_budgetsym_memory_pressure_selects_compressed();
+    test_dataset_generators_deterministic();
+    test_bench_metrics_compression_ratio();
 
     if (failures == 0) {
         std::cout << "ALL TESTS PASSED\n";
