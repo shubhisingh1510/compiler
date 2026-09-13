@@ -91,12 +91,6 @@ npm run build
 npm run start
 ```
 
-#### Standalone HTML Dashboard (Alternative):
-If you prefer a zero-dependency single-file HTML dashboard without Node.js:
-```bash
-xdg-open dashboard.html
-```
-
 ---
 
 ## Layout
@@ -128,7 +122,6 @@ corpora/                        Review-2: real-world source trees (FreeRTOS/Ardu
 frontend/                      Next.js + React + Tailwind CSS web dashboard and live simulator
 venv/                          Python virtual environment (sklearn/numpy/pandas/scipy/matplotlib)
 requirements.txt               Python package dependencies
-dashboard.html                 Standalone HTML fallback metrics dashboard & playground
 results/                       All generated measured data -- see docs/architecture.md's component
                                  map for which binary/script writes which CSV
 figures/                       PNG charts generated from results CSVs
