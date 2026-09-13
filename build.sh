@@ -8,6 +8,23 @@ CXX=${CXX:-g++}
 STD=-std=c++14   # this toolchain (MinGW.org GCC 6.3.0) lacks C++17 stdlib headers -- see docs/methodology.md
 FLAGS="$STD -O2 -Wall -Wextra"
 
+# Review-2 Phase 5: regenerate include/predicted_thresholds.hpp from
+# scripts/train_threshold_predictor.py before compiling, per PRD Section 10
+# ("run separately before the C++ build"). Optional and soft-skipped (same
+# pattern as the corpora block below) -- sklearn/numpy/pandas/scipy are not
+# required to build or run BUDGET-SYM itself, only to retrain the predictor.
+# The generated header is committed, so a skip here just means the build
+# uses whatever predicted_thresholds.hpp is already on disk.
+echo "== Regenerating ML threshold predictor (Review-2) =="
+if [ -f venv/bin/activate ]; then
+    (source venv/bin/activate && python scripts/train_threshold_predictor.py)
+elif python3 -c "import sklearn" >/dev/null 2>&1; then
+    python3 scripts/train_threshold_predictor.py
+else
+    echo "  no venv/ and no system sklearn -- skipping retrain, using committed include/predicted_thresholds.hpp"
+fi
+
+echo ""
 echo "== Building smoke test =="
 $CXX $FLAGS tests/smoke_test.cpp -o tests/smoke_test.exe
 
