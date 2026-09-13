@@ -82,6 +82,7 @@ export function KpiGrid() {
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         {kpis.map((kpi, idx) => (
           <div key={idx} className={`panel card-hover p-5 rounded-2xl border ${kpi.border} relative overflow-hidden`}>
+            <div className={`absolute -top-10 -right-10 h-28 w-28 rounded-full ${kpi.bg} opacity-70 blur-xl -z-10`} />
             <div className={`absolute top-0 left-0 right-0 h-1 ${kpi.bg}`} />
             <div className="flex items-center justify-between mb-3">
               <span className="text-[11px] font-mono font-medium text-slate-500 uppercase tracking-wider">

@@ -11,6 +11,7 @@ const NAV_ITEMS = [
   { href: "/scopes", label: "Scopes" },
   { href: "/memory", label: "Memory" },
   { href: "/benchmarks", label: "Benchmarks" },
+  { href: "/algorithms", label: "Algorithms" },
   { href: "/experiments", label: "Experiments" },
   { href: "/architecture", label: "Architecture" },
   { href: "/research", label: "Research" },
@@ -41,7 +42,7 @@ export function Navbar() {
         <div className="flex items-center justify-between gap-4 py-3">
           {/* Branding */}
           <Link href="/" className="flex items-center gap-2.5 shrink-0">
-            <div className="h-9 w-9 rounded-lg bg-white border border-slate-200 shadow-sm flex items-center justify-center">
+            <div className="h-9 w-9 rounded-lg bg-gradient-to-br from-violet-50 via-white to-teal-50 border border-slate-200 shadow-sm flex items-center justify-center">
               <Logomark />
             </div>
             <div>

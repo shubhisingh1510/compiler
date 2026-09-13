@@ -14,14 +14,14 @@ interface StatusResponse {
 }
 
 const SECTIONS = [
-  { href: "/compiler", title: "Compiler", desc: "Type source code, run it through the real C++ engine, see the representation decisions.", icon: "⌘" },
-  { href: "/symbols", title: "Symbol Table", desc: "Every symbol from the last compile: scope, type, representation, memory, and why.", icon: "▤" },
-  { href: "/scopes", title: "Scopes", desc: "Scope tree from the last compile — enter/exit, symbol counts, memory reclaimed.", icon: "◱" },
-  { href: "/memory", title: "Memory", desc: "Budget, pressure, and per-dataset memory breakdown from measured benchmark data.", icon: "◫" },
-  { href: "/benchmarks", title: "Benchmarks", desc: "8 datasets × 3 implementations — memory and latency, measured, not simulated.", icon: "▥" },
-  { href: "/experiments", title: "Experiments", desc: "Ablation study: which mechanism is responsible for how much of the result.", icon: "◧" },
-  { href: "/architecture", title: "Architecture", desc: "How a declaration flows from source text to a stored representation.", icon: "◈" },
-  { href: "/research", title: "Research", desc: "Problem, research gap, proposed architecture, limitations — stated plainly.", icon: "◎" },
+  { href: "/compiler", title: "Compiler", desc: "Type source code, run it through the real C++ engine, see the representation decisions.", icon: "⌘", pastel: "pastel-violet" },
+  { href: "/symbols", title: "Symbol Table", desc: "Every symbol from the last compile: scope, type, representation, memory, and why.", icon: "▤", pastel: "pastel-pink" },
+  { href: "/scopes", title: "Scopes", desc: "Scope tree from the last compile — enter/exit, symbol counts, memory reclaimed.", icon: "◱", pastel: "pastel-sky" },
+  { href: "/memory", title: "Memory", desc: "Budget, pressure, and per-dataset memory breakdown from measured benchmark data.", icon: "◫", pastel: "pastel-mint" },
+  { href: "/benchmarks", title: "Benchmarks", desc: "8 datasets × 3 implementations — memory and latency, measured, not simulated.", icon: "▥", pastel: "pastel-peach" },
+  { href: "/experiments", title: "Experiments", desc: "Ablation study: which mechanism is responsible for how much of the result.", icon: "◧", pastel: "pastel-lemon" },
+  { href: "/architecture", title: "Architecture", desc: "How a declaration flows from source text to a stored representation.", icon: "◈", pastel: "pastel-violet" },
+  { href: "/research", title: "Research", desc: "Problem, research gap, proposed architecture, limitations — stated plainly.", icon: "◎", pastel: "pastel-mint" },
 ];
 
 export default function DashboardHome() {
@@ -38,7 +38,14 @@ export default function DashboardHome() {
   return (
     <div className="space-y-8">
       {/* Hero */}
-      <div className="panel rounded-2xl p-6 lg:p-8">
+      <div className="panel rounded-2xl p-6 lg:p-8 relative overflow-hidden">
+        <div
+          className="absolute inset-0 -z-10"
+          style={{
+            background:
+              "radial-gradient(500px circle at -5% -20%, rgba(244,114,182,0.16), transparent 55%), radial-gradient(500px circle at 105% -20%, rgba(129,140,248,0.20), transparent 55%), radial-gradient(500px circle at 60% 130%, rgba(45,212,191,0.16), transparent 55%)",
+          }}
+        />
         <div className="flex flex-col lg:flex-row lg:items-start justify-between gap-6">
           <div className="max-w-2xl">
             <div className="flex items-center gap-2 mb-3">
@@ -92,9 +99,11 @@ export default function DashboardHome() {
             <Link
               key={s.href}
               href={s.href}
-              className="panel card-hover rounded-xl p-4 flex flex-col gap-2"
+              className="panel card-hover rounded-xl p-4 flex flex-col gap-3"
             >
-              <span className="text-lg text-indigo-500">{s.icon}</span>
+              <span className={`h-9 w-9 rounded-lg flex items-center justify-center text-base font-semibold ${s.pastel}`}>
+                {s.icon}
+              </span>
               <span className="text-sm font-semibold text-slate-900">{s.title}</span>
               <span className="text-xs text-slate-500 leading-relaxed">{s.desc}</span>
             </Link>

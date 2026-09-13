@@ -29,7 +29,12 @@ export function analyzeBinaryPath(): string | null {
   ]);
 }
 
-export function resultsCsvPath(name: "benchmark_results.csv" | "ablation_results.csv"): string | null {
+export function resultsCsvPath(name:
+  | "benchmark_results.csv"
+  | "ablation_results.csv"
+  | "cache_benchmark_results.csv"
+  | "algorithm_comparison.csv"
+): string | null {
   const root = repoRoot();
   return firstExisting([
     path.join(root, "results", name),
