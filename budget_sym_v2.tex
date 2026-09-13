@@ -48,15 +48,26 @@ data-driven replacements for the original hand-picked constants; (2)
 evaluation against real-world embedded C identifier corpora extracted from
 FreeRTOS, the Arduino core library, and the Zephyr RTOS; and (3) multi-seed
 statistical benchmarking with 95\% confidence intervals establishing
-statistical significance. This revision (Review-2, latency/ML extension)
-adds two further mechanisms: a 64-entry LRU lookup cache that measurably
-reduces BudgetSym's own lookup latency on hot-path access patterns, and a
-workload-adaptive ML threshold predictor (Ridge regression trained offline
-on 300 synthetic workloads over a 5-feature online profile) that
-reconfigures the policy thresholds after a 100-symbol profiling window with
-no additional runtime dependency. Lookup latency overhead remains an
-honestly reported cost of the design, now partially mitigated rather than
-eliminated.
+statistical significance. Review-2 (latency/ML extension) added two further
+mechanisms: a 64-entry LRU lookup cache that measurably reduces BudgetSym's
+own lookup latency on hot-path access patterns, and a workload-adaptive ML
+threshold predictor (Ridge regression trained offline on 300 synthetic
+workloads over a 5-feature online profile) that reconfigures the policy
+thresholds after a 100-symbol profiling window with no additional runtime
+dependency. This revision (Review-3) reports a correctness fix -- the
+lookup cache did not account for scope shadowing, so a symbol shadowing an
+outer-scope declaration of the same name could resolve to the wrong, stale
+entry, confirmed empirically and fixed with a permanent regression test --
+and a five-way comparison of alternative index hash functions and storage
+structures (two additional hash functions, a Robin Hood open-addressing
+baseline, and a shared-trie baseline) directly answering Review-2's own
+proposed future work on reducing cold-lookup cost structurally. No
+algorithm in that comparison wins both memory and lookup latency on any of
+the eight datasets: Robin Hood wins lookup latency universally by forgoing
+compression, and BudgetSym wins compression universally by paying the
+reconstruction cost Robin Hood avoids. Lookup latency overhead remains an
+honestly reported cost of the design, now examined from two independent
+angles (caching and structural alternatives) rather than eliminated.
 \end{abstract}
 
 \begin{IEEEkeywords}
@@ -94,10 +105,15 @@ symbols to a faster representation if they turn out to be accessed
 frequently. Review-1 established the prototype and baseline evaluation.
 Review-2 addressed the three most significant limitations identified in
 Review-1: hand-picked thresholds, synthetic-only workloads, and absence of
-statistical significance testing. This revision extends Review-2 along the
-axis its own Threats to Validity section flagged as unresolved: lookup
-overhead, and adds the data-driven threshold predictor that Review-2's
-Future Work section proposed but did not implement.
+statistical significance testing, and added the lookup cache and ML
+threshold predictor along the lookup-overhead axis Review-1 had left
+unresolved. This revision (Review-3) reports a correctness fix found while
+reviewing that cache (a scope-shadowing bug, confirmed empirically and
+fixed with a permanent regression test) and directly answers Review-2's
+own Future Work proposal to reduce cold-lookup cost structurally, by
+implementing and measuring two alternative storage structures (Robin Hood
+open addressing, a shared trie) and two additional index hash functions
+against the same benchmark suite.
 
 The main contributions of this work are:
 \begin{enumerate}
@@ -120,14 +136,21 @@ The main contributions of this work are:
   Arduino core, and Zephyr RTOS [Review-2].
 \item A 64-entry, hash-keyed LRU lookup cache that memoizes recently-resolved
   symbols, directly reducing the reconstruct-and-compare cost that dominates
-  BUDGET-SYM's lookup latency [\textbf{new}].
+  BUDGET-SYM's lookup latency [Review-2].
 \item Per-entry memoized COMPRESSED-chain reconstruction, eliminating
   redundant chain walks on repeated lookups of the same compressed symbol
-  [\textbf{new}].
+  [Review-2].
 \item An online WorkloadProfiler (5 features, 100-symbol sampling window)
   feeding a Ridge-regression ThresholdPredictor trained offline on 300
   synthetic workloads, reconfiguring policy thresholds mid-compilation with
-  no runtime ML dependency [\textbf{new}].
+  no runtime ML dependency [Review-2].
+\item A correctness fix for a scope-shadowing bug in the Review-2 lookup
+  cache, found by review, confirmed empirically, fixed, and covered by a
+  permanent regression test [\textbf{new}].
+\item Two additional index hash functions (MurmurHash3, DJB2) as swappable
+  BUDGET-SYM backends, and two new structural baselines (Robin Hood open
+  addressing, a shared trie), benchmarked against the same eight datasets
+  [\textbf{new}].
 \end{enumerate}
 
 \section{Background}
@@ -717,6 +740,171 @@ read as a first-pass sensitivity check, not a definitive feature-importance
 ranking -- more training workloads or a regularization-path analysis would
 be needed to say more confidently which features are load-bearing.
 
+\subsection{Review-3 Extension: Correctness Fix --- Lookup Cache and Scope Shadowing}
+\textbf{Motivation.} Reviewing Review-2's \texttt{LRULookupCache} before
+extending it (Section VIII-I below) surfaced a correctness question that
+Review-2's own tests did not exercise: the cache is keyed by
+\texttt{(hash, name)} with no representation of scope, so it is not obvious
+from inspection alone that a symbol shadowing an outer-scope declaration of
+the same name is resolved correctly.
+
+\textbf{Bug found.} It is not resolved correctly. \texttt{insert()} never
+touched \texttt{lookupCache\_} prior to this revision; only
+\texttt{exitScope()} invalidated cache entries, and only for symbols in the
+scope actually being popped. A new declaration that shadows an
+already-cached outer symbol of the same name therefore leaves the outer
+symbol's stale \texttt{(hash, name) -> id} mapping in place, and
+\texttt{lookup()}'s cache fast path returns it instead of resolving through
+the scope stack. Confirmed empirically rather than by inspection alone: a
+targeted reproduction forces an outer declaration of \texttt{"x"} to a
+promotable (COMPRESSED) representation and a shadowing inner \texttt{"x"}
+to a non-promotable one (INTERNED, via the exact-repeat rule, which takes
+priority over every other branch of \texttt{decide()}), then issues three
+\texttt{lookup("x")} calls from inside the inner scope. Before the fix,
+\texttt{promotions()} reports 1 -- the three accesses were credited to the
+shadowed \emph{outer} entry, which is only reachable at all if the cache
+served its stale mapping instead of the live inner symbol. After the fix,
+\texttt{promotions()} reports 0, matching correct scope-respecting
+resolution (the inner symbol is already INTERNED and has nothing to
+promote to).
+
+\textbf{Fix.} \texttt{insert()} now invalidates \texttt{lookupCache\_}'s
+entry for a hash immediately after computing it, before the new entry is
+added to the scope's index -- so any declaration that reuses a hash,
+shadowing or otherwise, forces the next lookup for that hash to re-resolve
+through the real scope stack rather than serve a cached answer that predates
+the new declaration. A regression test
+(\texttt{test\_lookup\_cache\_respects\_scope\_shadowing}) encodes the
+reproduction above and is now part of the permanent suite. This is reported
+as a correctness fix, not a performance change: it does not alter any
+memory or compression figure in this paper, and the cache's throughput
+characteristics (Section VIII-E) are unaffected, since invalidating one
+hash on every insert is $O(1)$.
+
+\textbf{Why Review-2's own tests missed it.} The existing cache-invalidation
+test uses a symbol name that exists only inside the scope under test; it
+never declares the same name in two enclosing scopes. This is stated
+plainly because it is a useful, general lesson independent of this specific
+bug: a passing test suite supports the claim ``the mechanism is tested,''
+not the stronger claim ``the mechanism is tested for every interaction that
+matters,'' and the gap between those two claims is exactly where this bug
+lived.
+
+\subsection{Review-3 Extension: Hashing and Storage Algorithm Comparison}
+\textbf{Motivation.} Review-2's Future Work (Section XV) proposed
+``reducing cold-lookup cost directly (e.g., a secondary index keyed by a
+cheap partial reconstruction) rather than only amortizing it via caching''
+as an alternative to the lookup cache. This revision implements and
+measures two concrete structural alternatives, plus isolates the index hash
+function itself as a variable BUDGET-SYM had not previously varied.
+
+\textbf{Hash function.} \texttt{BudgetSym} is templated on its index hash
+function (\texttt{BudgetSymT<HashFn>}, defaulting to the original FNV-1a via
+a type alias, so no existing caller's behavior changes). Two additional
+backends are compared: MurmurHash3 \cite{appleby-murmur} (the public-domain
+32-bit x86 finalizer, applied twice with different seeds and packed into a
+64-bit key, since implementing the full MurmurHash3\_x64\_128 variant was
+judged out of proportion to what this lookup path needs) and DJB2, a
+single-multiply-and-add hash with no mixing step, included as a
+cheap-end comparison point.
+
+\textbf{Robin Hood open addressing.} \texttt{RobinHoodSymbolTable}
+\cite{celis-robinhood} is a new, direct string-keyed baseline (no adaptive
+representation selection, no interning) applying Robin Hood linear-probing
+open addressing the same way \texttt{ConventionalSymbolTable} applies
+\texttt{std::unordered\_map} -- isolating table \emph{structure} as the only
+variable against the conventional baseline. Entries live inline in one
+contiguous array rather than one heap node per chain-bucket entry, which
+is the actual mechanism behind its lookup speed, not a faster hash. This
+comes at a real, separately-reported memory cost: every slot, occupied or
+not, is a live \texttt{std::string} plus metadata in a preallocated array,
+so the structure carries genuine ``slack'' memory for its empty slots that
+a chaining table's null-pointer buckets do not pay. Deletion is not
+implemented (no tombstones, no backward-shift delete), since this project's
+only removal path is whole-scope reclamation, identical to
+\texttt{ConventionalSymbolTable}'s own approach -- there is no exercised
+code path that would call a single-key delete from a still-live table.
+
+\textbf{Shared trie.} \texttt{TrieSymbolTable} \cite{fredkin-trie} shares
+identifier prefixes across every string ever inserted, project-wide,
+independent of insertion order -- strictly more powerful sharing than
+BUDGET-SYM's COMPRESSED front-coding, which only shares a prefix with the
+one identifier inserted immediately before it in the chain. The cost is
+real: a dedicated node with its own child map is charged per distinct
+branching character, which is more expensive than front-coding's raw
+suffix bytes when there is little global prefix overlap to exploit. Lookup
+needs no reconstruct-then-compare step at all -- walking the query
+string's characters down existing children \emph{is} the equality check --
+which is a structurally different answer to the lookup-cost question than
+either the LRU cache (Section VIII-E) or a faster hash function: it avoids
+reconstruction entirely, for every lookup, hit or miss, rather than
+amortizing it across repeats of the same symbol.
+
+\begin{table}[htbp]
+\caption{Best Algorithm per Dataset, by Metric}
+\label{tab:algocompare}
+\centering
+\small
+\begin{tabular}{lcc}
+\toprule
+Dataset & Best Compression & Best Lookup (hit) \\
+\midrule
+small & BudgetSym, 1.65$\times$ & RobinHood, 0.054 $\mu$s \\
+medium & BudgetSym, 1.63$\times$ & RobinHood, 0.055 $\mu$s \\
+large & BudgetSym, 1.64$\times$ & RobinHood, 0.054 $\mu$s \\
+high-prefix-sim. & BudgetSym, 2.37$\times$ & RobinHood, 0.082 $\mu$s \\
+random-identifiers & BudgetSym, 1.34$\times$ & RobinHood, 0.061 $\mu$s \\
+nested-scopes & BudgetSym, 1.84$\times$ & RobinHood, 0.054 $\mu$s \\
+hot-cold-access & BudgetSym, 1.57$\times$ & RobinHood, 0.046 $\mu$s \\
+memory-stress & BudgetSym, 1.38$\times$ & RobinHood, 0.105 $\mu$s \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{Results.} \texttt{src/algorithm\_benchmark\_main.cpp} compares
+BudgetSym-FNV1a, BudgetSym-Murmur3, BudgetSym-DJB2, RobinHood, and Trie on
+the same eight datasets and cost-accounting model as
+Table~\ref{tab:cache}. Table~\ref{tab:algocompare} reports the best
+algorithm per dataset on each of the two headline metrics. RobinHood wins
+lookup latency on every dataset, typically by roughly an order of magnitude
+or more over any BudgetSym variant, and BudgetSym wins compression on every
+dataset; no algorithm in the comparison wins both on any dataset. This is
+the direct, structural consequence of what each design optimizes for, not
+a coincidence of these particular measurements: BudgetSym pays a
+reconstruction cost specifically because it stores compressed or shared
+representations a direct string key cannot; RobinHood pays no
+reconstruction cost specifically because it stores full, uncompressed
+strings with no sharing, and pays real slack-memory overhead for that
+instead. Trie wins neither metric outright on any dataset but rejects
+absent identifiers fastest of all five algorithms on most datasets, since a
+missing child early in the walk ends the search immediately.
+
+\textbf{On hash function choice.} Memory is bit-for-bit identical across
+all three BudgetSym hash variants on every dataset and every run, as
+expected (the hash affects only bucket placement, never what is stored).
+Which hash function is fastest on lookup changes on every rerun of this
+benchmark on the shared, non-isolated development machine used for this
+work; the ranking itself is not reproducible, which is reported as the
+finding rather than papered over by presenting one run's ranking as
+definitive. The interpretation offered is that identifier strings in this
+project's workloads are short enough, and the dominant lookup cost
+(reconstruction) large enough, that hash-computation cost is not a
+distinguishing factor at this data scale.
+
+\textbf{An overclaim caught before publication.} An early run of this
+comparison showed Trie's lookup latency on the \texttt{random-identifiers}
+dataset higher than all three BudgetSym variants, consistent with a
+plausible mechanistic story: BudgetSym's adaptive policy can fall back to a
+cheap representation for identifiers that do not compress well, while a
+trie has no equivalent escape hatch. Repeating the identical run three more
+times showed Trie faster than BudgetSym twice and slower once, on identical
+code and data -- the effect was single-run timing noise on a shared
+machine, not a real, reproducible finding, and is reported here as such
+rather than as the clean story the first run suggested. This is offered as
+a concrete instance of the general risk Threats to Validity item 1 already
+names (single-seed measurement): a plausible-sounding, mechanism-backed
+result is not automatically a true one.
+
 \section{Experimental Methodology}
 Two real baselines are used: a conventional hash table
 (\texttt{unordered\_map<string, Symbol>}, one full string copy per symbol,
@@ -844,6 +1032,27 @@ item 8.
 \item A latent benchmark-harness measurement bug (Section VIII-E) means
   lookup-latency numbers from Review-1 and Review-2 were not reliable; only
   this revision's own lookup-latency figures should be trusted.
+\item A correctness bug in the lookup cache (Section VIII-G) meant a symbol
+  shadowing an outer-scope declaration of the same name could resolve to
+  the wrong, stale entry; fixed and regression-tested in this revision, but
+  it shipped in Review-2 undetected, which is itself evidence that this
+  project's test coverage claims should be read as ``tested for the cases
+  written,'' not ``tested exhaustively.''
+\item The grid-search-based ablation study (Section XI) and the ML
+  threshold predictor both interact with \texttt{PolicyConfig} at runtime,
+  but \texttt{ablation\_main.cpp}'s \texttt{BudgetSym-Full} and
+  \texttt{BudgetSym-NoScope} variants do not set
+  \texttt{disableMLThresholdPrediction}, while \texttt{BudgetSym-NoAccessFrequency}
+  explicitly does (with a comment explaining why). The asymmetry means two
+  of the four ablation variants can have their thresholds silently replaced
+  by the ML predictor mid-run while the other two cannot, which is a
+  potential confound in that comparison not yet resolved.
+\item Robin Hood's ``slack'' memory (Section VIII-H) is reported as a
+  separate diagnostic, not folded into the shared tracked-memory
+  accounting model every other implementation in this paper uses, so it is
+  not directly comparable to the memory-per-symbol figures in
+  Table~\ref{tab:algocompare}'s companion CSV without consulting that
+  separate figure.
 \end{enumerate}
 
 \section{Future Work}
@@ -860,8 +1069,19 @@ Planned next steps include:
   training workload if compute allows.
 \item Fix COMPRESSED chain-interior reclamation via a compacting GC pass
   over \texttt{compPool\_}.
-\item Reducing cold-lookup cost directly (e.g., a secondary index keyed by a
-  cheap partial reconstruction) rather than only amortizing it via caching.
+\item \textbf{Addressed this revision:} reducing cold-lookup cost directly
+  rather than only amortizing it via caching. RobinHood (Section VIII-H)
+  eliminates the reconstruct-and-compare step entirely by giving up
+  compression, quantifying exactly what that trade costs and buys; the
+  originally-proposed narrower idea (a secondary index keyed by a cheap
+  partial reconstruction, kept compressed) remains open and would need to
+  close the gap without RobinHood's full slack-memory cost.
+\item Resolving the ablation/ML-threshold-predictor interaction flagged in
+  Threats to Validity so all four ablation variants are compared under a
+  consistently fixed or consistently adaptive policy.
+\item Reducing the corpus fixtures' repository footprint (the extracted
+  identifier lists are currently committed directly rather than
+  regenerated from the already-gitignored source corpora on demand).
 \item Completed IEEE Xplore/ACM DL/arXiv literature and prior-art search.
 \item Integration with a real compiler front end (e.g., as an LLVM pass
   component).
@@ -881,11 +1101,24 @@ its memory-accounting model, and an online WorkloadProfiler feeding an
 offline-trained Ridge-regression ThresholdPredictor that automatically
 reconfigures policy thresholds after a 100-symbol sampling window, recovering
 most of a dataset-specific grid search's compression benefit on an unseen
-workload with no runtime ML dependency. Lookup latency overhead is reduced
-but remains an honestly reported, unresolved cost relative to the
-conventional baseline. Further work toward LLVM integration, real-corpus
-predictor training, and a complete prior-art search are the required next
-steps.
+workload with no runtime ML dependency. This revision (Review-3) contributes
+a correctness fix -- a scope-shadowing bug in the Review-2 lookup cache,
+found by review and confirmed empirically before being fixed and
+regression-tested -- and a five-way comparison of alternative hashing and
+storage backends (two additional index hash functions, a Robin Hood
+open-addressing baseline, and a shared-trie baseline) directly answering
+Review-2's own proposed future work on reducing cold-lookup cost
+structurally rather than only amortizing it. The comparison's central
+finding is that no algorithm wins both memory and lookup latency on any of
+the eight datasets: Robin Hood wins lookup latency universally by forgoing
+compression, and BudgetSym wins compression universally by paying the
+reconstruction cost that Robin Hood avoids. Lookup latency overhead is
+reduced along two independent axes (caching, and now this structural
+comparison) but remains an honestly reported, unresolved cost relative to
+the conventional baseline for BudgetSym itself. Further work toward LLVM
+integration, real-corpus predictor training, resolving the
+ablation/ML-predictor interaction noted in Threats to Validity, and a
+complete prior-art search are the required next steps.
 
 \begin{thebibliography}{00}
 \bibitem{liu-lab2} Link\"oping University, ``Lab 2: Symbol Table --- TDDE66
@@ -908,6 +1141,14 @@ steps.
 \bibitem{ieee-tools} IEEE Author Center Conferences, ``Authoring Tools and
   Templates.'' [Online]. Available:
   https://conferences.ieeeauthorcenter.ieee.org/write-your-paper/authoring-tools-and-templates/
+\bibitem{celis-robinhood} P. Celis, P.-A. Larson, and J. I. Munro, ``Robin
+  Hood Hashing,'' in \emph{Proc. 26th Annual Symposium on Foundations of
+  Computer Science (FOCS)}, 1985, pp. 281--288.
+\bibitem{fredkin-trie} E. Fredkin, ``Trie Memory,'' \emph{Communications of
+  the ACM}, vol. 3, no. 9, pp. 490--499, 1960.
+\bibitem{appleby-murmur} A. Appleby, ``MurmurHash3 and the SMHasher hash
+  function test suite.'' [Online]. Available:
+  https://github.com/aappleby/smhasher
 \end{thebibliography}
 
 \vspace{1em}
