@@ -1,5 +1,5 @@
 variant,symbols,memory_bytes,memory_per_symbol,promotions,insert_us,lookup_us,bytes_reclaimed_total
-BudgetSym-Full,800,34326,42.9075,4,0.862526,0.95536,15562
-BudgetSym-NoScope,1200,49888,41.5733,4,0.766282,1.20816,0
-BudgetSym-NoAccessFrequency,800,34143,42.6788,0,0.742436,0.71176,15562
-BudgetSym-NoAdaptiveSelection,800,57042,71.3025,0,0.822603,0.56328,28427
+BudgetSym-Full,800,31894,39.8675,4,1.01317,0.66616,14602
+BudgetSym-NoScope,1200,46496,38.7467,4,0.815516,0.56356,0
+BudgetSym-NoAccessFrequency,800,34143,42.6788,0,0.793776,0.4038,15562
+BudgetSym-NoAdaptiveSelection,800,57042,71.3025,0,0.822792,0.35228,28427

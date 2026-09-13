@@ -1,0 +1,6 @@
+dropped_feature,mean_r2_delta,most_affected_threshold,most_affected_r2_delta
+meanNameLength,0.0525380327194093,prefixSimilarityMinShared,0.13687245359543687
+prefixSimilarityCoeff,0.019811987870814302,compressMinLen,0.13124799351689487
+repeatRate,0.01474230398749273,prefixSimilarityMinShared,0.06496878074188028
+scopeDepthVariance,-0.004512784566410077,inlineMaxLen,-0.027356877089351528
+nameEntropy,0.008086618904824391,prefixSimilarityMinShared,0.035159145891453636
