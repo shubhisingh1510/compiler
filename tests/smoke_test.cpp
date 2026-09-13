@@ -10,6 +10,9 @@
 #include "../include/budget_sym.hpp"
 #include "../include/dataset_generators.hpp"
 #include "../include/bench_metrics.hpp"
+#include "../include/robinhood_symbol_table.hpp"
+#include "../include/trie_symbol_table.hpp"
+#include "../include/hash_functions.hpp"
 
 using namespace budgetsym;
 
@@ -234,6 +237,115 @@ void test_bench_metrics_compression_ratio() {
     CHECK(budgetM.symbols == ds.identifiers.size() || budgetM.symbols <= ds.identifiers.size());
 }
 
+// ---- regression test for a real bug found during the merge that added ----
+// hash_functions.hpp/RobinHood/Trie on top of the Review-2 lookup cache: the
+// LRU lookup cache is keyed by (hash, name) with no scope awareness, so a
+// nested-scope declaration that shadows an outer one with the SAME name was
+// resolving lookup()'s cache fast path to the stale OUTER entry -- proven by
+// forcing the outer "x" to COMPRESSED (promotable) and the shadowing inner
+// "x" to INTERNED (not promotable: isRepeat is true for the second "x", so
+// decide() takes the exact-repeat branch regardless of any other setting),
+// then checking that repeated lookups of "x" from inside the inner scope do
+// NOT trigger a promotion -- a promotion firing here can only mean lookup()
+// resolved to the (wrong) outer COMPRESSED entry instead of the live inner
+// one. Fixed by invalidating the lookup cache's entry for a hash whenever a
+// new declaration inserts under that hash (see budget_sym.hpp's insert()).
+void test_lookup_cache_respects_scope_shadowing() {
+    PolicyConfig cfg;
+    cfg.compressMinLen = 1;           // make even "x" eligible for COMPRESSED
+    cfg.highPressureThreshold = 0.0;  // force "always high pressure"
+    cfg.hotAccessThreshold = 2;       // promote quickly if the bug is present
+    cfg.disableMLThresholdPrediction = true; // keep cfg fixed for this test
+
+    BudgetSym t(1 << 20, cfg);
+    t.insert("x"); // outer x: isRepeat=false, longId, highPressure -> COMPRESSED_REP
+    CHECK(t.representationOf("x") == Representation::COMPRESSED_REP);
+    CHECK(t.lookup("x")); // populates the lookup cache for hash("x") -> outer id
+
+    t.enterScope();
+    t.insert("x"); // inner x: isRepeat=true -> INTERNED_REP, shadows outer
+    CHECK(t.representationOf("x") == Representation::INTERNED_REP);
+
+    t.lookup("x");
+    t.lookup("x");
+    t.lookup("x");
+    // If lookup() incorrectly served the stale cached OUTER (COMPRESSED) id,
+    // these three accesses would cross hotAccessThreshold and promote it.
+    CHECK(t.promotions() == 0);
+}
+
+// ---- new correctness tests: hash-function backends -----------------------
+
+void test_budgetsym_hash_backends_agree() {
+    BudgetSymMurmur3 tm(1 << 20);
+    BudgetSymDjb2 td(1 << 20);
+    tm.insert("i"); tm.insert("index"); tm.insert("temperatureThresholdValue");
+    td.insert("i"); td.insert("index"); td.insert("temperatureThresholdValue");
+    CHECK(tm.lookup("i") && tm.lookup("index") && tm.lookup("temperatureThresholdValue"));
+    CHECK(!tm.lookup("doesNotExist"));
+    CHECK(td.lookup("i") && td.lookup("index") && td.lookup("temperatureThresholdValue"));
+    CHECK(!td.lookup("doesNotExist"));
+}
+
+void test_murmur3_deterministic_and_differs_from_fnv() {
+    CHECK(Murmur3Hash::hash("abc") == Murmur3Hash::hash("abc"));
+    bool anyDiffer = false;
+    for (const std::string& s : {std::string("abc"), std::string("identifier"), std::string("x")}) {
+        if (Murmur3Hash::hash(s) != FnvHash::hash(s)) anyDiffer = true;
+    }
+    CHECK(anyDiffer);
+}
+
+// ---- new correctness tests: RobinHood open addressing ---------------------
+
+void test_robinhood_basic_and_scope_reclaim() {
+    RobinHoodSymbolTable t(1 << 20);
+    t.insert("x");
+    t.insert("y");
+    CHECK(t.lookup("x") && t.lookup("y"));
+    CHECK(!t.lookup("z"));
+    t.enterScope();
+    t.insert("local1");
+    CHECK(t.lookup("local1"));
+    auto rep = t.exitScope();
+    CHECK(rep.symbolsReleased == 1);
+    CHECK(!t.lookup("local1"));
+    CHECK(t.lookup("x"));
+}
+
+void test_robinhood_survives_resize() {
+    RobinHoodSymbolTable t(1 << 20);
+    for (int i = 0; i < 300; i++) t.insert("sym_" + std::to_string(i));
+    for (int i = 0; i < 300; i++) CHECK(t.lookup("sym_" + std::to_string(i)));
+    CHECK(!t.lookup("sym_not_present"));
+    CHECK(t.size() == 300);
+}
+
+// ---- new correctness tests: Trie storage -----------------------------------
+
+void test_trie_basic_and_prefix_is_not_a_match() {
+    TrieSymbolTable t(1 << 20);
+    t.insert("temperatureSensorReading");
+    t.insert("temperatureSensorOffset");
+    CHECK(t.lookup("temperatureSensorReading"));
+    CHECK(t.lookup("temperatureSensorOffset"));
+    CHECK(!t.lookup("temperatureSensor"));
+    CHECK(!t.lookup("temperatureSensorReadingX"));
+}
+
+void test_trie_scope_reclaim_and_shared_prefix_survives() {
+    TrieSymbolTable t(1 << 20);
+    t.insert("shared_global");
+    t.enterScope();
+    t.insert("shared_global");
+    t.insert("local1");
+    CHECK(t.lookup("local1"));
+    auto rep = t.exitScope();
+    CHECK(rep.symbolsReleased == 2);
+    CHECK(!t.lookup("local1"));
+    CHECK(t.lookup("shared_global"));
+}
+
 int main() {
     test_conventional();
     test_interned();
@@ -251,6 +363,14 @@ int main() {
     test_budgetsym_memory_pressure_selects_compressed();
     test_dataset_generators_deterministic();
     test_bench_metrics_compression_ratio();
+
+    test_lookup_cache_respects_scope_shadowing();
+    test_budgetsym_hash_backends_agree();
+    test_murmur3_deterministic_and_differs_from_fnv();
+    test_robinhood_basic_and_scope_reclaim();
+    test_robinhood_survives_resize();
+    test_trie_basic_and_prefix_is_not_a_match();
+    test_trie_scope_reclaim_and_shared_prefix_survives();
 
     if (failures == 0) {
         std::cout << "ALL TESTS PASSED\n";

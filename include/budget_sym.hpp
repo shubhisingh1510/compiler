@@ -32,12 +32,21 @@
 #include "lookup_cache.hpp"
 #include "workload_profiler.hpp"
 #include "predicted_thresholds.hpp"
+#include "hash_functions.hpp"
 
 namespace budgetsym {
 
-class BudgetSym {
+// Templated on the hash function used for the index's first-stage lookup key
+// (see hash_functions.hpp) -- purely additive on top of the Review-2 caching/
+// ML-prediction work above: every existing caller keeps working unchanged
+// via the `BudgetSym` alias at the bottom of this file (BudgetSymT<FnvHash>,
+// i.e. today's original behavior). Orthogonal to LRULookupCache/
+// WorkloadProfiler/ThresholdPredictor -- those operate on whatever hash this
+// parameter produces, so nothing else in this class needs to change.
+template <typename HashFn = FnvHash>
+class BudgetSymT {
 public:
-    explicit BudgetSym(size_t budgetBytes, PolicyConfig cfg = PolicyConfig())
+    explicit BudgetSymT(size_t budgetBytes, PolicyConfig cfg = PolicyConfig())
         : tracker_(budgetBytes), cfg_(cfg) {
         scopes_.emplace_back();
     }
@@ -98,7 +107,20 @@ public:
         tracker_.add(cost);
 
         entries_.push_back(e);
-        uint64_t h = fnv1a(name);
+        uint64_t h = HashFn::hash(name);
+        // Correctness fix: a new declaration sharing this hash -- most often
+        // the exact same name shadowing an outer-scope symbol -- must not
+        // leave a stale (hash, name) -> old-id mapping in the lookup cache.
+        // Without this, lookup()'s cache fast path resolves shadowed names to
+        // the WRONG (outer, stale) entry: it checks (hash, name) equality,
+        // both of which are identical for a shadowing redeclaration, and has
+        // no scope-awareness at all. Confirmed empirically before this fix --
+        // a nested-scope shadow of "x" caused the OUTER "x" to receive
+        // accessCount increments and even get incorrectly promoted while the
+        // inner "x" was the live, correct match. exitScope()'s own
+        // invalidate() call does not cover this case: it only fires when a
+        // scope closes, not when a new declaration opens one.
+        lookupCache_.invalidate(h);
         scopes_.back().hashIndex.insert(std::make_pair(h, id));
 
         if (!profiler_.isComplete()) {
@@ -122,7 +144,7 @@ public:
     void setLookupCacheEnabled(bool e) { lookupCache_.setEnabled(e); }
 
     bool lookup(const std::string& name) {
-        uint64_t h = fnv1a(name);
+        uint64_t h = HashFn::hash(name);
 
         // Fast path: a 64-entry LRU cache of recently-looked-up symbols, keyed
         // by hash+name. A hit skips the hash-bucket walk and the
@@ -160,7 +182,7 @@ public:
     void recordAccess(const std::string& name) { lookup(name); } // lookup already counts + promotes
 
     Representation representationOf(const std::string& name) {
-        uint64_t h = fnv1a(name);
+        uint64_t h = HashFn::hash(name);
         for (auto sIt = scopes_.rbegin(); sIt != scopes_.rend(); ++sIt) {
             auto range = sIt->hashIndex.equal_range(h);
             for (auto it = range.first; it != range.second; ++it) {
@@ -488,5 +510,12 @@ private:
     PolicyConfig cfg_;
     mutable std::string lastDecisionReason_; // set by decide() (const); see lastDecisionReason()
 };
+
+// Default instantiation: identical behavior to the original, untemplated
+// BudgetSym class (FNV-1a index hash). Every existing caller uses this alias
+// and needed zero changes to keep compiling.
+using BudgetSym = BudgetSymT<FnvHash>;
+using BudgetSymMurmur3 = BudgetSymT<Murmur3Hash>;
+using BudgetSymDjb2 = BudgetSymT<Djb2Hash>;
 
 } // namespace budgetsym

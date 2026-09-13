@@ -61,7 +61,12 @@ inline Metrics runOne(HiResTimer& g_timer, const std::string& implName, const Da
     for (size_t i = 0; i < successSample.size(); i++) failSample.push_back("ZZZ_ABSENT_" + std::to_string(i) + "_XYZ");
     auto t4 = g_timer.now();
     volatile bool sinkMiss = false;
-    for (auto& id : failSample) sinkMiss = sinkMiss || table.lookup(id);
+    // Not currently a live instance of the short-circuit bug noted above --
+    // every id in failSample is guaranteed-absent, so lookup() always
+    // returns false and sinkMiss never flips true, so nothing ever gets
+    // skipped. Written in the same call-first form anyway so this stays
+    // correct if failSample ever stops being all-misses.
+    for (auto& id : failSample) { bool miss = table.lookup(id); sinkMiss = sinkMiss || miss; }
     auto t5 = g_timer.now();
     m.lookup_failure_us = failSample.empty() ? 0.0 :
         g_timer.microsecondsBetween(t4, t5) / static_cast<double>(failSample.size());
