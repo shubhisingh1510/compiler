@@ -102,20 +102,40 @@ xdg-open dashboard.html
 ## Layout
 
 ```
-include/                 Header-only C++ implementations (Conventional, Interned, BudgetSym, memory tracker, timer)
-src/demo_main.cpp        -> budget_sym_demo.exe (live interactive demonstration)
-src/benchmark_main.cpp   -> benchmark.exe (8-dataset x 3-implementation comparison)
-src/ablation_main.cpp    -> ablation.exe (4-variant mechanism isolation)
-tests/smoke_test.cpp     -> tests/smoke_test.exe (assert-based correctness checks)
-scripts/plot_results.py  CSV -> figures/*.png plot script
-frontend/                Next.js + React + Tailwind CSS web dashboard and live simulator
-venv/                    Python virtual environment for plotting scripts
-requirements.txt         Python package dependencies (matplotlib, pandas, numpy)
-dashboard.html           Standalone HTML fallback metrics dashboard & playground
-results/                 benchmark_results.csv, ablation_results.csv (generated measured data)
-figures/                 5 PNG charts generated from results CSVs
-docs/                    Research gap, novelty, methodology, architecture, experiment plan, Q&A
-DEMO.md                  5-minute presentation plan for faculty review
+include/                       Header-only C++ implementations
+  budget_sym.hpp                 Core adaptive symbol table (decide(), promotion, memoized reconstruction)
+  lookup_cache.hpp                Review-2: 64-entry LRU lookup cache
+  workload_profiler.hpp           Review-2: 5-feature workload profiler (100-symbol window)
+  predicted_thresholds.hpp        Review-2: GENERATED Ridge-regression threshold predictor (do not hand-edit)
+  conventional_symbol_table.hpp   Baseline #1
+  interned_symbol_table.hpp       Baseline #2
+  memory_tracker.hpp, hires_timer.hpp, dataset_generators.hpp, bench_metrics.hpp, common.hpp
+src/demo_main.cpp              -> budget_sym_demo.exe (live interactive demonstration)
+src/benchmark_main.cpp         -> benchmark.exe (8-dataset x implementation comparison; v3 pass adds
+                                   cache/ML-predicted variants -> results/benchmark_results_v3.csv)
+src/ablation_main.cpp          -> ablation.exe (4-variant mechanism isolation)
+src/grid_search_main.cpp       -> grid_search.exe (Review-2: 15,000-combination threshold sweep)
+src/multiseed_main.cpp         -> multiseed.exe (Review-2: 30-seed statistical validation)
+src/corpus_bench_main.cpp      -> corpus_bench.exe (Review-2: real-world corpus evaluation)
+tests/smoke_test.cpp           -> tests/smoke_test.exe (assert-based correctness checks)
+scripts/
+  plot_results.py                CSV -> figures/*.png plot script (needs venv/'s matplotlib)
+  multiseed_stats.py              Computes 95% CI / p-values from multiseed_raw.csv
+  extract_identifiers.py          Review-2: tokenizes real .c/.h sources for corpus_bench.exe
+  train_threshold_predictor.py    Review-2: trains + compares 7 models, exports predicted_thresholds.hpp
+corpora/                        Review-2: real-world source trees (FreeRTOS/Arduino/Zephyr), gitignored
+                                 -- see docs/corpus_setup.md to (re)vendor them
+frontend/                      Next.js + React + Tailwind CSS web dashboard and live simulator
+venv/                          Python virtual environment (sklearn/numpy/pandas/scipy/matplotlib)
+requirements.txt               Python package dependencies
+dashboard.html                 Standalone HTML fallback metrics dashboard & playground
+results/                       All generated measured data -- see docs/architecture.md's component
+                                 map for which binary/script writes which CSV
+figures/                       PNG charts generated from results CSVs
+docs/                          Research gap, novelty, methodology, architecture, experiment plan, Q&A,
+                                 corpus setup, and docs/review2_status.md (Review-2 handoff status)
+budget_sym_v2.tex               IEEE paper source (Review-2), compiled to BUDGET_SYM_v2_IEEE.pdf
+DEMO.md                        5-minute presentation plan for faculty review
 ```
 
 ## Headline Result (from `results/benchmark_results.csv`)

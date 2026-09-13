@@ -50,6 +50,20 @@ flowchart TD
 | Plotting | `scripts/plot_results.py` | Reads the CSVs above, writes `figures/*.png` |
 | Correctness | `tests/smoke_test.cpp` -> `smoke_test` | Assert-based checks, no fabricated pass |
 
+### Review-2 additions
+
+| Component | File | Responsibility |
+|---|---|---|
+| LRU Lookup Cache | `include/lookup_cache.hpp` | 64-entry name+hash-keyed cache in front of the hash-then-reconstruct lookup path; `invalidate()` on scope exit |
+| Workload Profiler | `include/workload_profiler.hpp` | Observes the first 100 inserts, extracts 5 `WorkloadFeatures` (mean name length, prefix-similarity coeff, repeat rate, scope-depth variance, name entropy) |
+| Threshold Predictor | `include/predicted_thresholds.hpp` | Generated header: 6 clamped Ridge-regression dot products, no runtime ML dependency; `BudgetSym::insert()` calls this once `WorkloadProfiler::isComplete()` |
+| Memoized reconstruction | `include/budget_sym.hpp` (`CompEntry::reconstructedCache`) | First lookup of a COMPRESSED entry pays the chain-walk cost once; tracked via `memoHits`/`memoColdLookups` |
+| Grid search | `src/grid_search_main.cpp` -> `grid_search` | 15,000-combination threshold sweep -> `results/grid_search_full.csv`, `results/optimal_policy.csv` |
+| Multi-seed validation | `src/multiseed_main.cpp` -> `multiseed`, `scripts/multiseed_stats.py` | 30-seed statistical validation -> `results/multiseed_raw.csv`, `results/multiseed_summary.csv` (95% CI, p-values) |
+| Real-world corpus eval | `src/corpus_bench_main.cpp` -> `corpus_bench`, `scripts/extract_identifiers.py` | Tokenizes real `.c`/`.h` sources under `corpora/` (gitignored) -> `results/corpus_results.csv`; see `docs/corpus_setup.md` |
+| ML training pipeline | `scripts/train_threshold_predictor.py` | Trains and compares 7 regression models per threshold on 300 synthetic workloads -> `results/model_comparison.csv`, `results/feature_ablation.csv`; exports Ridge coefficients to `include/predicted_thresholds.hpp` |
+| Cache-aware benchmark | `src/benchmark_main.cpp`'s v3 pass | `BudgetSym`/`BudgetSym-WithCache`/`BudgetSym-MLPredicted` variants -> `results/benchmark_results_v3.csv` (adds `cache_hit_rate`, `promotions`, `bytes_reclaimed`, `memo_hits`, `memo_cold_lookups`, `compression_ratio`, `insert_latency_us`) |
+
 ## Why the lookup index cannot be keyed by the identifier string itself
 
 This is the one design decision worth calling out explicitly, because it is

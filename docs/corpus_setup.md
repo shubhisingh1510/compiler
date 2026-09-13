@@ -1,10 +1,16 @@
 # Real-world corpus evaluation setup
 
-This sandbox has no internet access, so the real FreeRTOS/Arduino/Zephyr
-source trees are not available here. `corpus_bench.exe` and
-`scripts/extract_identifiers.py` are already built and unit-verified against
-small hand-made fixtures -- run the steps below on your own machine (with
-internet access) to produce real corpus results.
+**Status: done.** This has been run end-to-end in this repo -- `corpora/`
+(gitignored, not committed) currently holds real checkouts of all three
+codebases, and `results/corpus_results.csv` holds the real measured numbers
+that back Section VIII-F of `budget_sym_v2.tex`. An earlier revision of this
+doc said "this sandbox has no internet access" -- that was true in an
+earlier session but is not a permanent constraint; the steps below were
+re-run successfully once network access was available. If you're picking
+this project up on a machine without `corpora/` vendored (e.g. after a fresh
+clone -- `corpora/` is gitignored), just re-run the steps below; results
+should reproduce closely (single deterministic run, no seed variation across
+corpora since there's exactly one real token stream per corpus).
 
 ## 1. Clone the corpora
 
