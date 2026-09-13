@@ -103,6 +103,9 @@ include/                       Header-only C++ implementations
   predicted_thresholds.hpp        Review-2: GENERATED Ridge-regression threshold predictor (do not hand-edit)
   conventional_symbol_table.hpp   Baseline #1
   interned_symbol_table.hpp       Baseline #2
+  robinhood_symbol_table.hpp      Robin Hood open-addressing baseline, direct string-keyed (docs/robinhood.md)
+  trie_symbol_table.hpp           Shared-trie compression baseline (docs/trie.md)
+  hash_functions.hpp              FnvHash/Murmur3Hash/Djb2Hash -- swappable BudgetSymT<HashFn> backends
   memory_tracker.hpp, hires_timer.hpp, dataset_generators.hpp, bench_metrics.hpp, common.hpp
 src/demo_main.cpp              -> budget_sym_demo.exe (live interactive demonstration)
 src/benchmark_main.cpp         -> benchmark.exe (8-dataset x implementation comparison; v3 pass adds
@@ -111,6 +114,8 @@ src/ablation_main.cpp          -> ablation.exe (4-variant mechanism isolation)
 src/grid_search_main.cpp       -> grid_search.exe (Review-2: 15,000-combination threshold sweep)
 src/multiseed_main.cpp         -> multiseed.exe (Review-2: 30-seed statistical validation)
 src/corpus_bench_main.cpp      -> corpus_bench.exe (Review-2: real-world corpus evaluation)
+src/cache_benchmark_main.cpp   -> cache_benchmark.exe (LRU cache on/off comparison, docs/caching.md)
+src/algorithm_benchmark_main.cpp -> algorithm_benchmark.exe (5-way hash/storage comparison, docs/algorithm_comparison.md)
 tests/smoke_test.cpp           -> tests/smoke_test.exe (assert-based correctness checks)
 scripts/
   plot_results.py                CSV -> figures/*.png plot script (needs venv/'s matplotlib)

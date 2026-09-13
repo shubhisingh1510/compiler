@@ -49,6 +49,12 @@ $CXX $FLAGS src/multiseed_main.cpp -o multiseed.exe
 echo "== Building corpus_bench (Review-2: real-world corpus evaluation) =="
 $CXX $FLAGS src/corpus_bench_main.cpp -o corpus_bench.exe
 
+echo "== Building cache benchmark (docs/caching.md) =="
+$CXX $FLAGS src/cache_benchmark_main.cpp -o cache_benchmark.exe
+
+echo "== Building algorithm comparison benchmark (docs/algorithm_comparison.md) =="
+$CXX $FLAGS src/algorithm_benchmark_main.cpp -o algorithm_benchmark.exe
+
 echo ""
 echo "== Running smoke test =="
 ./tests/smoke_test.exe
@@ -95,6 +101,14 @@ done
 if [ "$CORPORA_FOUND" = "0" ]; then
     echo "  no corpora vendored under corpora/ -- skipping real-world eval, see docs/corpus_setup.md"
 fi
+
+echo ""
+echo "== Running cache benchmark (writes results/cache_benchmark_results.csv) =="
+./cache_benchmark.exe
+
+echo ""
+echo "== Running algorithm comparison benchmark (writes results/algorithm_comparison.csv) =="
+./algorithm_benchmark.exe
 
 echo ""
 echo "== Generating figures (requires python + matplotlib + pandas is NOT required, csv module only) =="
