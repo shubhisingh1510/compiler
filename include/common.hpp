@@ -52,6 +52,17 @@ struct PolicyConfig {
     // "BudgetSym-NoAdaptiveSelection" variant without duplicating the class.
     bool disableAdaptiveSelection = false;
     Representation fixedRepresentation = Representation::INTERNED_REP;
+
+    // Review-2 Phase 4 opt-out: BudgetSym::insert() automatically replaces
+    // cfg_ with ThresholdPredictor::predict()'s output once WorkloadProfiler's
+    // 100-symbol window fills (see budget_sym.hpp). That is the desired
+    // default for a real compilation run, but it would silently invalidate
+    // any caller that is deliberately holding thresholds fixed to measure
+    // them -- most importantly grid_search_main.cpp's sweep, where every one
+    // of its 15,000 configs would otherwise get overwritten by the same
+    // ML-predicted thresholds partway through each dataset. Set true to keep
+    // whatever PolicyConfig was constructed with, for the whole run.
+    bool disableMLThresholdPrediction = false;
 };
 
 struct SymbolMeta {

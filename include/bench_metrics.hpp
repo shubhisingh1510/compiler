@@ -47,7 +47,11 @@ inline Metrics runOne(HiResTimer& g_timer, const std::string& implName, const Da
 
     auto t2 = g_timer.now();
     volatile bool sinkHit = false;
-    for (auto& id : successSample) sinkHit = sinkHit || table.lookup(id);
+    // NOTE: must not write `sinkHit = sinkHit || table.lookup(id)` here --
+    // that short-circuits as soon as sinkHit first becomes true, silently
+    // skipping every later lookup() call in the loop (the timed region would
+    // then just be spinning, not actually looking anything up). Review-2 fix.
+    for (auto& id : successSample) { bool hit = table.lookup(id); sinkHit = sinkHit || hit; }
     auto t3 = g_timer.now();
     m.lookup_success_us = successSample.empty() ? 0.0 :
         g_timer.microsecondsBetween(t2, t3) / static_cast<double>(successSample.size());

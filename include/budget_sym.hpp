@@ -29,6 +29,9 @@
 #include <cstdint>
 #include "common.hpp"
 #include "memory_tracker.hpp"
+#include "lookup_cache.hpp"
+#include "workload_profiler.hpp"
+#include "predicted_thresholds.hpp"
 
 namespace budgetsym {
 
@@ -55,6 +58,7 @@ public:
             if (e.tombstoned) continue;
             long long freed = releaseEntry(e);
             e.tombstoned = true;
+            lookupCache_.invalidate(kv.first);
             rep.bytesReclaimed += freed;
             rep.symbolsReleased++;
         }
@@ -96,11 +100,47 @@ public:
         entries_.push_back(e);
         uint64_t h = fnv1a(name);
         scopes_.back().hashIndex.insert(std::make_pair(h, id));
+
+        if (!profiler_.isComplete()) {
+            profiler_.observe(name, e.meta.scopeId, isRepeat);
+            // Fires exactly once, on the insert() call that pushes
+            // sampleCount past sampleTarget (default 100). Skipped under the
+            // ablation switch -- overwriting cfg_ mid-run would silently
+            // defeat disableAdaptiveSelection's fixed-representation intent.
+            if (profiler_.isComplete() && !cfg_.disableAdaptiveSelection && !cfg_.disableMLThresholdPrediction) {
+                WorkloadFeatures features = profiler_.extract();
+                cfg_ = ThresholdPredictor::predict(features);
+            }
+        }
         return id;
     }
 
+    const WorkloadProfiler& profiler() const { return profiler_; }
+
+    // See LRULookupCache::setEnabled() -- Review-2 benchmark/paper hook for
+    // isolating the lookup cache's latency effect (Section VIII-E).
+    void setLookupCacheEnabled(bool e) { lookupCache_.setEnabled(e); }
+
     bool lookup(const std::string& name) {
         uint64_t h = fnv1a(name);
+
+        // Fast path: a 64-entry LRU cache of recently-looked-up symbols, keyed
+        // by hash+name. A hit skips the hash-bucket walk and the
+        // reconstruct-and-compare step entirely -- see include/lookup_cache.hpp.
+        void* cachedPtr = nullptr;
+        if (lookupCache_.get(h, name, cachedPtr)) {
+            int id = idFromCachePtr(cachedPtr);
+            Entry& e = entries_[id];
+            if (!e.tombstoned) {
+                e.meta.accessCount++;
+                maybePromote(e, name);
+                return true;
+            }
+            // Stale cache entry (scope reclaimed the symbol without going
+            // through exitScope()'s invalidate() path -- should not normally
+            // happen, but fail safe by falling through to the real lookup).
+        }
+
         for (auto sIt = scopes_.rbegin(); sIt != scopes_.rend(); ++sIt) {
             auto range = sIt->hashIndex.equal_range(h);
             for (auto it = range.first; it != range.second; ++it) {
@@ -109,6 +149,7 @@ public:
                 if (reconstructName(e) == name) {
                     e.meta.accessCount++;
                     maybePromote(e, name);
+                    lookupCache_.put(h, name, cachePtrFromId(it->second));
                     return true;
                 }
             }
@@ -140,6 +181,22 @@ public:
     const PolicyConfig& config() const { return cfg_; }
     size_t promotions() const { return promotions_; }
 
+    // Aggregate counters surfaced for the benchmark/analysis tooling -- see
+    // include/lookup_cache.hpp's CacheStats for the lookup-cache half of this.
+    struct Statistics {
+        int memoHits = 0;         // reconstructFull() calls served from reconstructedCache
+        int memoColdLookups = 0;  // reconstructFull() calls that walked the chain
+        CacheStats lookupCache;   // LRU lookup-cache hit/miss/hitRate (see lookup_cache.hpp)
+    };
+
+    Statistics statistics() const {
+        Statistics s;
+        s.memoHits = static_cast<int>(memoHits_);
+        s.memoColdLookups = static_cast<int>(memoColdLookups_);
+        s.lookupCache = lookupCache_.stats();
+        return s;
+    }
+
     // Human-readable reason for the representation decide() made on the most
     // recent insert() call. Additive, non-breaking: existing callers that
     // never look at this are unaffected. Used by the web dashboard's Symbol
@@ -148,6 +205,14 @@ public:
     const std::string& lastDecisionReason() const { return lastDecisionReason_; }
 
 private:
+    // entries_ is a std::vector<Entry>; push_back() can reallocate and
+    // invalidate any raw Entry* taken earlier. So the LRU cache's opaque
+    // void* payload holds the stable integer entry id (packed via intptr_t),
+    // never a pointer into entries_ itself -- lookup() re-derives a live
+    // reference with entries_[id] on every cache hit.
+    static void* cachePtrFromId(int id) { return reinterpret_cast<void*>(static_cast<intptr_t>(id)); }
+    static int idFromCachePtr(void* p) { return static_cast<int>(reinterpret_cast<intptr_t>(p)); }
+
     struct Entry {
         SymbolMeta meta;
         std::string inlineStr;   // valid when representation == INLINE_REP
@@ -160,6 +225,7 @@ private:
         uint8_t sharedPrefixLen = 0;
         std::string suffix;
         int prevIndex = -1;
+        std::string reconstructedCache; // empty = not yet memoized
     };
 
     struct Scope {
@@ -332,11 +398,37 @@ private:
         return 0;
     }
 
+    // Internal recursive chain walk, memoizing every node it visits along the
+    // way. Deliberately not the thing that increments memoHits_/memoColdLookups_
+    // -- those track top-level reconstruction requests (see reconstructFull()
+    // below), not the internal bookkeeping calls insertCompressed() makes to
+    // compute a new entry's shared-prefix length against the current chain tail.
+    std::string reconstructChain(int idx) const {
+        CompEntry& ce = compPool_[idx];
+        if (!ce.reconstructedCache.empty()) return ce.reconstructedCache;
+        std::string result;
+        if (ce.prevIndex == -1) {
+            result = ce.suffix;
+        } else {
+            std::string prev = reconstructChain(ce.prevIndex);
+            result = prev.substr(0, ce.sharedPrefixLen) + ce.suffix;
+        }
+        ce.reconstructedCache = result;
+        return result;
+    }
+
+    // Top-level entry point used by the lookup path (reconstructName()). If
+    // compPool_[idx].reconstructedCache is already populated, returns it
+    // directly (memoHits_); otherwise performs the chain walk once and caches
+    // the result (memoColdLookups_).
     std::string reconstructFull(int idx) const {
-        const CompEntry& ce = compPool_[idx];
-        if (ce.prevIndex == -1) return ce.suffix;
-        std::string prev = reconstructFull(ce.prevIndex);
-        return prev.substr(0, ce.sharedPrefixLen) + ce.suffix;
+        CompEntry& ce = compPool_[idx];
+        if (!ce.reconstructedCache.empty()) {
+            memoHits_++;
+            return ce.reconstructedCache;
+        }
+        memoColdLookups_++;
+        return reconstructChain(idx);
     }
 
     std::string reconstructName(const Entry& e) const {
@@ -357,7 +449,7 @@ private:
             ce.suffix = name;
             ce.prevIndex = -1;
         } else {
-            std::string prevFull = reconstructFull(chainTail_);
+            std::string prevFull = reconstructChain(chainTail_);
             size_t shared = commonPrefixLen(prevFull, name);
             if (shared > 255) shared = 255;
             ce.sharedPrefixLen = static_cast<uint8_t>(shared);
@@ -382,12 +474,16 @@ private:
     std::vector<int> poolRefCount_;
     std::unordered_map<std::string, int> poolLookup_;
 
-    std::vector<CompEntry> compPool_;
+    mutable std::vector<CompEntry> compPool_;
+    mutable size_t memoHits_ = 0;        // reconstructFull() calls served from reconstructedCache
+    mutable size_t memoColdLookups_ = 0; // reconstructFull() calls that walked the chain
     int chainTail_ = -1;
     size_t compressedInsertCount_ = 0;
     std::string lastInsertedFull_; // most recent insert()'d name, any representation
 
     size_t promotions_ = 0;
+    LRULookupCache<64> lookupCache_;
+    WorkloadProfiler profiler_;
     MemoryTracker tracker_;
     PolicyConfig cfg_;
     mutable std::string lastDecisionReason_; // set by decide() (const); see lastDecisionReason()

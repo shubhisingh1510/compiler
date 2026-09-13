@@ -124,6 +124,11 @@ int main() {
     {
         PolicyConfig cfg;
         cfg.hotAccessThreshold = static_cast<size_t>(-1); // SIZE_MAX: never "hot"
+        // Without this, the Review-2 Phase 4 auto-ML-override would replace
+        // cfg (including hotAccessThreshold) after the 100th insert, silently
+        // making symbols "hot"-eligible again and defeating this variant's
+        // isolation of the access-frequency mechanism.
+        cfg.disableMLThresholdPrediction = true;
         results.push_back(runVariant("BudgetSym-NoAccessFrequency", cfg, true, w));
     }
 

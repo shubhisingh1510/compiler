@@ -81,6 +81,10 @@ int main() {
                     for (size_t e = 0; e < 5; e++) {
                         for (size_t f = 0; f < 5; f++) {
                             PolicyConfig cfg;
+                            // Hold this sweep's fixed thresholds for the whole
+                            // dataset -- see common.hpp's disableMLThresholdPrediction
+                            // doc comment (Review-2 Phase 4/5 fix).
+                            cfg.disableMLThresholdPrediction = true;
                             cfg.inlineMaxLen = inlineMaxLenVals[a];
                             cfg.compressMinLen = compressMinLenVals[b];
                             cfg.lowPressureThreshold = lowPressureThresholdVals[c];
@@ -130,6 +134,13 @@ int main() {
     fullOut.close();
 
     PolicyConfig handPicked; // common.hpp defaults
+    // Hold the true Review-1 hand-picked thresholds fixed for the whole
+    // dataset -- without this, any dataset with >100 identifiers would have
+    // its post-100-symbol thresholds silently replaced by
+    // ThresholdPredictor::predict(), making this comparison baseline a
+    // hand-picked/ML hybrid instead of the genuine Review-1 policy (Review-2
+    // Phase 4/5 fix, same as the sweep configs above).
+    handPicked.disableMLThresholdPrediction = true;
     double handPickedSum = 0.0;
     for (size_t i = 0; i < datasets.size(); i++) {
         handPickedSum += compressionRatioFor(datasets[i], handPicked, conventionalBytes[i]);
