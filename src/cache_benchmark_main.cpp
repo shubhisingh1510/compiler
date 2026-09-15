@@ -9,18 +9,23 @@
 //                        first-time query, i.e. a guaranteed miss -- so this
 //                        phase's job is to show the cache's bookkeeping
 //                        overhead on a workload it cannot help.
-//   repeated_lookup_us : a bounded hot subset (sized to fit inside the
-//                        cache's fixed 64-entry capacity -- see
-//                        LRULookupCache<64> in budget_sym.hpp) looked up
-//                        repeatedly. This is the access pattern the cache
-//                        actually targets. Using the FULL sample here would
-//                        thrash a 64-entry cache into a ~0% hit rate
-//                        regardless of the cache's real behavior -- a bug
-//                        caught while building the first version of this
-//                        file (see docs/caching.md) and independently
-//                        avoided in benchmark_main.cpp's own hot-cold-access
-//                        handling with the same reasoning.
+//   repeated_lookup_us : a bounded hot subset (32 symbols, comfortably under
+//                        the cache's capacity) looked up repeatedly. This is
+//                        the access pattern the cache actually targets.
+//                        Using the FULL sample here would thrash the cache
+//                        into a ~0% hit rate regardless of its real
+//                        behavior -- a bug caught while building the first
+//                        version of this file (see docs/latency.md) and
+//                        independently avoided in benchmark_main.cpp's own
+//                        hot-cold-access handling with the same reasoning.
 // Reporting both, not just the flattering second one, is deliberate.
+//
+// A separate "large-hot-set" scenario (150 symbols, below) specifically
+// measures the cache-capacity fix in docs/latency.md: this file's own
+// 32-symbol hot subset above was, by construction, always within even the
+// cache's OLD 64-entry capacity, so the 8-dataset comparison above cannot
+// show the thrashing cliff that motivated raising it to 256 -- a gap in
+// this benchmark's own coverage, not a claim that the fix doesn't matter.
 #include <algorithm>
 #include <fstream>
 #include <iostream>
@@ -74,12 +79,12 @@ static CacheMetrics runVariant(const Dataset& ds, bool cacheEnabled) {
 
     // Fresh table for the repeated-hot-subset phase, not the one the cold
     // sweep above just ran 500 lookups across -- reusing it would mean the
-    // cold sweep's tail evicts the hot subset from the 64-entry cache before
+    // cold sweep's tail evicts the hot subset from the 256-entry cache before
     // this phase starts (see file header comment).
     BudgetSym hotTable(ds.budgetBytes);
     hotTable.setLookupCacheEnabled(cacheEnabled);
     for (auto& id : ds.identifiers) hotTable.insert(id);
-    size_t hotSubsetSize = std::min<size_t>(sample.size(), 32); // well under the 64-entry cache
+    size_t hotSubsetSize = std::min<size_t>(sample.size(), 32); // well under the cache capacity
     std::vector<std::string> hotSubset(sample.begin(), sample.begin() + static_cast<long>(hotSubsetSize));
 
     auto t4 = g_timer.now();
@@ -140,6 +145,52 @@ int main() {
                   << "us/lookup (" << on.speedup_vs_no_cache_x << "x), hit_rate="
                   << on.cache_hit_rate << ", cold(off)=" << off.cold_lookup_us
                   << "us cold(on)=" << on.cold_lookup_us << "us\n";
+    }
+
+    // Large-hot-set scenario: 150 distinct symbols, all touched every round
+    // -- realistic for, e.g., a large function's locals accessed once per
+    // loop iteration -- specifically sized ABOVE the cache's old 64-entry
+    // capacity (see docs/latency.md for why 64 was a hard thrashing cliff,
+    // not a gradual falloff, at this working-set size).
+    {
+        const int kHotSetSize = 150;
+        const int kLargeRepeats = 10;
+        std::vector<std::string> hotNames;
+        for (int i = 0; i < kHotSetSize; i++) {
+            hotNames.push_back("hotPathVariableAccessedFrequentlyInLoopBody" + std::to_string(i));
+        }
+        PolicyConfig cfg;
+        cfg.disableMLThresholdPrediction = true; // isolate the cache effect from ML re-tuning mid-run
+
+        auto runLargeHotSet = [&](bool cacheEnabled) {
+            CacheMetrics m;
+            m.dataset = "large-hot-set-150";
+            m.cacheEnabled = cacheEnabled;
+            BudgetSym table(defaultBudget, cfg);
+            table.setLookupCacheEnabled(cacheEnabled);
+            for (auto& n : hotNames) table.insert(n);
+            volatile bool sink = false;
+            auto t0 = g_timer.now();
+            for (int r = 0; r < kLargeRepeats; r++) {
+                for (auto& n : hotNames) { bool hit = table.lookup(n); sink = sink || hit; }
+            }
+            auto t1 = g_timer.now();
+            (void)sink;
+            m.repeated_lookup_us = g_timer.microsecondsBetween(t0, t1) / static_cast<double>(kLargeRepeats * hotNames.size());
+            m.cache_hit_rate = table.statistics().lookupCache.hitRate;
+            m.symbols = table.size();
+            return m;
+        };
+
+        CacheMetrics off = runLargeHotSet(false);
+        CacheMetrics on = runLargeHotSet(true);
+        on.speedup_vs_no_cache_x = on.repeated_lookup_us > 0.0 ? off.repeated_lookup_us / on.repeated_lookup_us : 0.0;
+        off.speedup_vs_no_cache_x = 1.0;
+        writeRow(out, off);
+        writeRow(out, on);
+        std::cout << "large-hot-set-150: cache-off=" << off.repeated_lookup_us
+                  << "us/lookup, cache-on=" << on.repeated_lookup_us << "us/lookup ("
+                  << on.speedup_vs_no_cache_x << "x), hit_rate=" << on.cache_hit_rate << "\n";
     }
 
     out.close();

@@ -146,6 +146,30 @@ void test_budgetsym_lookup_cache_invalidation_on_scope_exit() {
     CHECK(!t.lookup("scopedTemp")); // must not resurrect a reclaimed symbol via a stale cache entry
 }
 
+// Regression test for the cache-capacity fix (docs/latency.md): a hot set
+// larger than the cache's old 64-entry capacity used to get a 0% hit rate
+// under a cyclic access pattern (LRU thrashing is a hard cliff, not a
+// gradual falloff -- confirmed empirically before choosing 256). This
+// asserts the fix stays in effect rather than silently regressing if the
+// capacity is ever lowered again.
+void test_lookup_cache_handles_hot_set_larger_than_old_capacity() {
+    PolicyConfig cfg;
+    cfg.disableMLThresholdPrediction = true;
+    BudgetSym t(64ull * 1024 * 1024, cfg);
+    std::vector<std::string> hotNames;
+    for (int i = 0; i < 150; i++) {
+        hotNames.push_back("hotPathVariableAccessedFrequentlyInLoopBody" + std::to_string(i));
+    }
+    for (auto& n : hotNames) t.insert(n);
+    for (int r = 0; r < 10; r++) {
+        for (auto& n : hotNames) t.lookup(n);
+    }
+    // Theoretical ceiling for this access pattern is one unavoidable cold
+    // miss per symbol (150 misses out of 1500 total lookups = 90% hit
+    // rate); at the old 64-entry capacity this measured 0%.
+    CHECK(t.statistics().lookupCache.hitRate > 0.85);
+}
+
 // Review-2 addition: WorkloadProfiler (Phase 3).
 void test_workload_profiler_mean_name_length() {
     BudgetSym t(1 << 20);
@@ -356,6 +380,7 @@ int main() {
     test_budgetsym_memo_reconstruction();
     test_budgetsym_lookup_cache_hit_rate();
     test_budgetsym_lookup_cache_invalidation_on_scope_exit();
+    test_lookup_cache_handles_hot_set_larger_than_old_capacity();
     test_workload_profiler_mean_name_length();
     test_threshold_predictor_aggressive_compression_for_high_prefix_workload();
     test_budgetsym_applies_predicted_thresholds_after_profiling_window();

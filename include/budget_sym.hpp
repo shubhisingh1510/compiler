@@ -504,7 +504,23 @@ private:
     std::string lastInsertedFull_; // most recent insert()'d name, any representation
 
     size_t promotions_ = 0;
-    LRULookupCache<64> lookupCache_;
+    // Capacity was 64. Measured directly (see docs/latency.md): under a
+    // cyclic/round-robin access pattern -- e.g. a loop that touches each of
+    // a function's locals in turn every iteration, a realistic compiler
+    // workload -- LRU thrashing is a hard cliff, not a gradual falloff. A
+    // 150-symbol hot set got a *0% hit rate* at both 64 and 128 capacity
+    // (every access evicts something needed again before it's reused) and a
+    // 95% hit rate at 256 (matches the theoretical ceiling: one unavoidable
+    // cold miss per symbol, then all hits). A 32-symbol hot set -- well
+    // within either capacity -- showed no regression at 256 (same 95% hit
+    // rate, latency same or marginally better). 256 is not a fix for
+    // arbitrarily large hot sets -- the same cliff exists above 256 -- it is
+    // an evidence-based increase to a size realistic compiler workloads
+    // (a large function's locals) are less likely to exceed, at a memory
+    // cost of roughly (256-64) cache entries per BudgetSym instance
+    // (a few KB, not charged against the tracked-memory model -- see
+    // Threats to Validity item 2).
+    LRULookupCache<256> lookupCache_;
     WorkloadProfiler profiler_;
     MemoryTracker tracker_;
     PolicyConfig cfg_;
